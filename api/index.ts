@@ -1,5 +1,6 @@
 // Vercel Edge Functions Native Entrypoint
 import { EdgeRouter } from "../src/core/router";
+import { TursoStorageAdapter } from "../src/storage/turso";
 import { MemoryStorageAdapter, type StorageAdapter } from "../src/storage";
 import { ModelDiscovery } from "../src/core/discovery";
 import { OAuthManager } from "../src/core/oauth";
@@ -58,7 +59,19 @@ async function getRouter(): Promise<{ router: EdgeRouter; storage: StorageAdapte
     return { router: cachedRouter, storage: cachedStorage };
   }
 
-  const storage: StorageAdapter = new MemoryStorageAdapter();
+  let storage: StorageAdapter;
+  const tursoUrl = process.env.TURSO_DATABASE_URL;
+  const tursoToken = process.env.TURSO_AUTH_TOKEN;
+
+  if (tursoUrl && tursoToken) {
+    const turso = new TursoStorageAdapter(tursoUrl, tursoToken);
+    try {
+      await turso.initSchema();
+    } catch {}
+    storage = turso;
+  } else {
+    storage = new MemoryStorageAdapter();
+  }
 
   if (!initialized) {
     const existing = await storage.getCombos();

@@ -1,6 +1,7 @@
 // Cloudflare Workers Native Serverless Entrypoint
 import { EdgeRouter } from "./core/router";
 import { D1StorageAdapter, type D1Database } from "./storage/d1";
+import { TursoStorageAdapter } from "./storage/turso";
 import { MemoryStorageAdapter, type StorageAdapter } from "./storage";
 import { ModelDiscovery } from "./core/discovery";
 import { OAuthManager } from "./core/oauth";
@@ -14,6 +15,9 @@ import { PUBLIC_LANDING_HTML } from "./landingHtml";
 
 export interface Env {
   DB?: D1Database;
+  TURSO_DATABASE_URL?: string;
+  TURSO_AUTH_TOKEN?: string;
+  ADMIN_PASSWORD?: string;
   MASTER_KEY?: string;
 }
 
@@ -65,7 +69,18 @@ async function getRouter(env: Env): Promise<{ router: EdgeRouter; storage: Stora
     return { router: cachedRouter, storage: cachedStorage };
   }
 
-  const storage: StorageAdapter = env.DB ? new D1StorageAdapter(env.DB) : new MemoryStorageAdapter();
+  let storage: StorageAdapter;
+  if (env.TURSO_DATABASE_URL && env.TURSO_AUTH_TOKEN) {
+    const turso = new TursoStorageAdapter(env.TURSO_DATABASE_URL, env.TURSO_AUTH_TOKEN);
+    try {
+      await turso.initSchema();
+    } catch {}
+    storage = turso;
+  } else if (env.DB) {
+    storage = new D1StorageAdapter(env.DB);
+  } else {
+    storage = new MemoryStorageAdapter();
+  }
 
   if (!initialized) {
     const existing = await storage.getCombos();
