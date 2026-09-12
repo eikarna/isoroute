@@ -205,6 +205,68 @@
     mobileDrawerOpen[tab] = !mobileDrawerOpen[tab];
   }
 
+  // Instant Search Queries & Filtered Derivations (500+ ~ 1k items)
+  let providerSearch = $state("");
+  let comboSearch = $state("");
+  let keySearch = $state("");
+  let ruleSearch = $state("");
+
+  const filteredProviders = $derived(
+    providerSearch.trim() === ""
+      ? providers
+      : providers.filter((p) => {
+          const q = providerSearch.toLowerCase().trim();
+          return (
+            p.id.toLowerCase().includes(q) ||
+            p.name.toLowerCase().includes(q) ||
+            p.type.toLowerCase().includes(q) ||
+            p.baseUrl.toLowerCase().includes(q)
+          );
+        })
+  );
+
+  const filteredCombos = $derived(
+    comboSearch.trim() === ""
+      ? combos
+      : combos.filter((c) => {
+          const q = comboSearch.toLowerCase().trim();
+          return (
+            c.id.toLowerCase().includes(q) ||
+            c.displayName.toLowerCase().includes(q) ||
+            c.targets.some(
+              (t) =>
+                t.providerId.toLowerCase().includes(q) ||
+                t.model.toLowerCase().includes(q)
+            )
+          );
+        })
+  );
+
+  const filteredApiKeys = $derived(
+    keySearch.trim() === ""
+      ? apiKeys
+      : apiKeys.filter((k) => {
+          const q = keySearch.toLowerCase().trim();
+          return (
+            k.name.toLowerCase().includes(q) ||
+            k.key.toLowerCase().includes(q) ||
+            (k.allowedModels && k.allowedModels.some((m) => m.toLowerCase().includes(q)))
+          );
+        })
+  );
+
+  const filteredRules = $derived(
+    ruleSearch.trim() === ""
+      ? routeRules
+      : routeRules.filter((r) => {
+          const q = ruleSearch.toLowerCase().trim();
+          return (
+            r.pattern.toLowerCase().includes(q) ||
+            r.target.toLowerCase().includes(q)
+          );
+        })
+  );
+
   let playModel = $state("");
   let playPrompt = $state("Summarize what an isomorphic edge gateway does in two sentences.");
   let playStream = $state(true);
@@ -1155,7 +1217,20 @@
           <div class="tab-pane">
             <div class="split-layout">
               <div class="card-list">
-                {#each providers as prov (prov.id)}
+                <div class="search-bar">
+                  <input
+                    type="text"
+                    class="search-input"
+                    placeholder="Search providers (id, name, url)..."
+                    bind:value={providerSearch}
+                  />
+                  {#if providerSearch}
+                    <button class="search-clear" onclick={() => providerSearch = ''} title="Clear">✕</button>
+                  {/if}
+                  <span class="search-count">{filteredProviders.length}/{providers.length}</span>
+                </div>
+
+                {#each filteredProviders as prov (prov.id)}
                   <div class="item-card">
                     <div class="card-head">
                       <div class="title-group">
@@ -1176,6 +1251,8 @@
                 {/each}
                 {#if providers.length === 0}
                   <div class="empty-cell">No providers registered.</div>
+                {:else if filteredProviders.length === 0}
+                  <div class="empty-cell">No providers matching "{providerSearch}"</div>
                 {/if}
               </div>
 
@@ -1339,7 +1416,20 @@
           <div class="tab-pane">
             <div class="split-layout">
               <div class="card-list">
-                {#each combos as combo (combo.id)}
+                <div class="search-bar">
+                  <input
+                    type="text"
+                    class="search-input"
+                    placeholder="Search combos or upstream models..."
+                    bind:value={comboSearch}
+                  />
+                  {#if comboSearch}
+                    <button class="search-clear" onclick={() => comboSearch = ''} title="Clear">✕</button>
+                  {/if}
+                  <span class="search-count">{filteredCombos.length}/{combos.length}</span>
+                </div>
+
+                {#each filteredCombos as combo (combo.id)}
                   {@const load = comboLoad.get(combo.id) ?? 0}
                   <div class="item-card">
                     <div class="card-head">
@@ -1365,6 +1455,8 @@
                 {/each}
                 {#if combos.length === 0}
                   <div class="empty-cell">No combos configured.</div>
+                {:else if filteredCombos.length === 0}
+                  <div class="empty-cell">No combos matching "{comboSearch}"</div>
                 {/if}
               </div>
 
@@ -1416,7 +1508,20 @@
           <div class="tab-pane">
             <div class="split-layout">
               <div class="card-list">
-                {#each apiKeys as k (k.id)}
+                <div class="search-bar">
+                  <input
+                    type="text"
+                    class="search-input"
+                    placeholder="Search keys by name or snippet..."
+                    bind:value={keySearch}
+                  />
+                  {#if keySearch}
+                    <button class="search-clear" onclick={() => keySearch = ''} title="Clear">✕</button>
+                  {/if}
+                  <span class="search-count">{filteredApiKeys.length}/{apiKeys.length}</span>
+                </div>
+
+                {#each filteredApiKeys as k (k.id)}
                   {@const isExpired = k.expiresAt && Date.now() > k.expiresAt}
                   {@const isExhausted = (k.maxRequests && k.usedRequests >= k.maxRequests) || (k.maxTokens && k.usedTokens >= k.maxTokens)}
                   <div class="item-card">
@@ -1462,6 +1567,8 @@
                 {/each}
                 {#if apiKeys.length === 0}
                   <div class="empty-cell">No consumer API keys issued yet.</div>
+                {:else if filteredApiKeys.length === 0}
+                  <div class="empty-cell">No keys matching "{keySearch}"</div>
                 {/if}
               </div>
 
@@ -1529,7 +1636,20 @@
           <div class="tab-pane">
             <div class="split-layout">
               <div class="card-list">
-                {#each routeRules as r (r.id)}
+                <div class="search-bar">
+                  <input
+                    type="text"
+                    class="search-input"
+                    placeholder="Search pattern or target..."
+                    bind:value={ruleSearch}
+                  />
+                  {#if ruleSearch}
+                    <button class="search-clear" onclick={() => ruleSearch = ''} title="Clear">✕</button>
+                  {/if}
+                  <span class="search-count">{filteredRules.length}/{routeRules.length}</span>
+                </div>
+
+                {#each filteredRules as r (r.id)}
                   <div class="item-card">
                     <div class="card-head">
                       <div class="title-group">
@@ -1544,6 +1664,8 @@
                 {/each}
                 {#if routeRules.length === 0}
                   <div class="empty-cell">No force routing rewrite rules configured yet.</div>
+                {:else if filteredRules.length === 0}
+                  <div class="empty-cell">No rules matching "{ruleSearch}"</div>
                 {/if}
               </div>
 
@@ -2152,6 +2274,55 @@
   /* Split layouts */
   .split-layout { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; align-items: start; }
   .card-list { display: flex; flex-direction: column; gap: 9px; }
+
+  /* Search bar */
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #09090b;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 6px 10px;
+    margin-bottom: 3px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    outline: none;
+    padding: 2px 0;
+  }
+  .search-input::placeholder {
+    color: var(--text-dim);
+  }
+  .search-clear {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+  }
+  .search-clear:hover {
+    color: var(--text);
+  }
+  .search-count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    user-select: none;
+    font-variant-numeric: tabular-nums;
+  }
+
   .item-card {
     background: var(--surface);
     border: 1px solid var(--border);
