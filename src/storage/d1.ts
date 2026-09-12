@@ -362,4 +362,115 @@ export class D1StorageAdapter implements StorageAdapter {
       enabled: Boolean(r.enabled),
     };
   }
+
+  // Chunked D1 Batch execution (safe within D1 100-statement limit per batch)
+  async saveProvidersBatch(providers: Provider[]): Promise<number> {
+    if (providers.length === 0) return 0;
+    const chunkSize = 80;
+    for (let i = 0; i < providers.length; i += chunkSize) {
+      const chunk = providers.slice(i, i + chunkSize);
+      const stmts = chunk.map((p) =>
+        this.db.prepare(`
+          INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            base_url = excluded.base_url,
+            api_key = excluded.api_key,
+            type = excluded.type,
+            headers_json = excluded.headers_json,
+            oauth_json = excluded.oauth_json,
+            enabled = excluded.enabled;
+        `).bind(
+          p.id,
+          p.name,
+          p.baseUrl,
+          p.apiKey ?? null,
+          p.type || "openai",
+          p.headers ? JSON.stringify(p.headers) : null,
+          p.oauth ? JSON.stringify(p.oauth) : null,
+          p.enabled ? 1 : 0
+        )
+      );
+      await this.db.batch(stmts);
+    }
+    return providers.length;
+  }
+
+  async saveCombosBatch(combos: ModelCombo[]): Promise<number> {
+    if (combos.length === 0) return 0;
+    const chunkSize = 80;
+    for (let i = 0; i < combos.length; i += chunkSize) {
+      const chunk = combos.slice(i, i + chunkSize);
+      const stmts = chunk.map((c) =>
+        this.db.prepare(`
+          INSERT INTO combos (id, display_name, description, targets_json, enabled)
+          VALUES (?1, ?2, ?3, ?4, ?5)
+          ON CONFLICT(id) DO UPDATE SET
+            display_name = excluded.display_name,
+            description = excluded.description,
+            targets_json = excluded.targets_json,
+            enabled = excluded.enabled;
+        `).bind(
+          c.id,
+          c.displayName,
+          c.description ?? null,
+          JSON.stringify(c.targets),
+          c.enabled ? 1 : 0
+        )
+      );
+      await this.db.batch(stmts);
+    }
+    return combos.length;
+  }
+
+  async saveKeysBatch(keys: ApiKeyRecord[]): Promise<number> {
+    if (keys.length === 0) return 0;
+    const chunkSize = 80;
+    for (let i = 0; i < keys.length; i += chunkSize) {
+      const chunk = keys.slice(i, i + chunkSize);
+      const stmts = chunk.map((k) =>
+        this.db.prepare(`
+          INSERT INTO api_keys (
+            id, name, key, created_at, expires_at,
+            max_requests, max_tokens, max_prompt_tokens, max_completion_tokens,
+            used_requests, used_tokens, used_prompt_tokens, used_completion_tokens,
+            required_headers_json, required_body_json, allowed_models_json, enabled
+          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            key = excluded.key,
+            expires_at = excluded.expires_at,
+            max_requests = excluded.max_requests,
+            max_tokens = excluded.max_tokens,
+            max_prompt_tokens = excluded.max_prompt_tokens,
+            max_completion_tokens = excluded.max_completion_tokens,
+            required_headers_json = excluded.required_headers_json,
+            required_body_json = excluded.required_body_json,
+            allowed_models_json = excluded.allowed_models_json,
+            enabled = excluded.enabled;
+        `).bind(
+          k.id,
+          k.name,
+          k.key,
+          k.createdAt,
+          k.expiresAt ?? null,
+          k.maxRequests ?? null,
+          k.maxTokens ?? null,
+          k.maxPromptTokens ?? null,
+          k.maxCompletionTokens ?? null,
+          k.usedRequests ?? 0,
+          k.usedTokens ?? 0,
+          k.usedPromptTokens ?? 0,
+          k.usedCompletionTokens ?? 0,
+          k.requiredHeaders ? JSON.stringify(k.requiredHeaders) : null,
+          k.requiredBodyKeywords ? JSON.stringify(k.requiredBodyKeywords) : null,
+          k.allowedModels ? JSON.stringify(k.allowedModels) : null,
+          k.enabled ? 1 : 0
+        )
+      );
+      await this.db.batch(stmts);
+    }
+    return keys.length;
+  }
 }

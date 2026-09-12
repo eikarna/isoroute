@@ -7,6 +7,7 @@ import { OAuthManager } from "../src/core/oauth";
 import { AdminAuth } from "../src/core/auth";
 import { ProviderProbe } from "../src/core/probe";
 import { KeyManager, type ApiKeyRecord } from "../src/core/keys";
+import { BulkIngestEngine } from "../src/core/bulk";
 import type { RouteRule } from "../src/core/rewrite";
 import type { ChatCompletionRequest, ModelCombo, Provider } from "../src/types";
 import { DASHBOARD_HTML } from "../src/dashboardHtml";
@@ -179,6 +180,121 @@ export default async function handler(request: Request): Promise<Response> {
   if (path === "/api/combos" && request.method === "GET") {
     const combos = await storage.getCombos();
     return Response.json({ combos }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  // Headless Model & Combo Discovery API (9Router parity)
+  if (path === "/api/models" && request.method === "GET") {
+    const combos = await storage.getCombos();
+    const providers = await storage.getProviders();
+    return Response.json({
+      models: combos.map((c) => ({
+        id: c.id,
+        name: c.displayName,
+        description: c.description,
+        targets: c.targets,
+        enabled: c.enabled,
+      })),
+      totalCombos: combos.length,
+      totalProviders: providers.length,
+    }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  // Bulk Ingest Providers (API keys, OAuth, Cookie sessions)
+  if (path === "/api/providers/bulk" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin auth required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const start = Date.now();
+    const contentType = request.headers.get("content-type") || "";
+    const rawData = contentType.includes("application/json") ? await request.json() : await request.text();
+    const providers = BulkIngestEngine.parseCredentials(rawData);
+    let count = 0;
+    if (storage.saveProvidersBatch) {
+      count = await storage.saveProvidersBatch(providers);
+    } else {
+      for (const p of providers) await storage.saveProvider(p);
+      count = providers.length;
+    }
+    return Response.json({
+      success: true,
+      total: providers.length,
+      saved: count,
+      durationMs: Date.now() - start,
+    }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  // Bulk Ingest Models into Combos
+  if (path === "/api/models/bulk" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin auth required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const start = Date.now();
+    const contentType = request.headers.get("content-type") || "";
+    const rawData = contentType.includes("application/json") ? await request.json() : await request.text();
+    const defaultProviderId = typeof rawData === "object" && rawData?.providerId ? rawData.providerId : "default-provider";
+    const combos = BulkIngestEngine.parseModels(rawData, defaultProviderId);
+    let count = 0;
+    if (storage.saveCombosBatch) {
+      count = await storage.saveCombosBatch(combos);
+    } else {
+      for (const c of combos) await storage.saveCombo(c);
+      count = combos.length;
+    }
+    return Response.json({
+      success: true,
+      total: combos.length,
+      saved: count,
+      durationMs: Date.now() - start,
+    }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  // Bulk Ingest Combos directly
+  if (path === "/api/combos/bulk" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin auth required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const start = Date.now();
+    const body = await request.json();
+    const combos = BulkIngestEngine.parseModels(body);
+    let count = 0;
+    if (storage.saveCombosBatch) {
+      count = await storage.saveCombosBatch(combos);
+    } else {
+      for (const c of combos) await storage.saveCombo(c);
+      count = combos.length;
+    }
+    return Response.json({
+      success: true,
+      total: combos.length,
+      saved: count,
+      durationMs: Date.now() - start,
+    }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  // Bulk Ingest Consumer API Keys
+  if (path === "/api/keys/bulk" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin auth required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const start = Date.now();
+    const body = await request.json();
+    const defaultTier = typeof body === "object" && !Array.isArray(body) ? { maxRequests: body.maxRequests, maxTokens: body.maxTokens } : undefined;
+    const rawKeys = Array.isArray(body) ? body : (body.keys || body.names || body.items || body);
+    const keys = BulkIngestEngine.parseApiKeys(rawKeys, defaultTier);
+    let count = 0;
+    if (storage.saveKeysBatch) {
+      count = await storage.saveKeysBatch(keys);
+    } else {
+      for (const k of keys) await storage.saveKey(k);
+      count = keys.length;
+    }
+    return Response.json({
+      success: true,
+      total: keys.length,
+      saved: count,
+      keys: keys.map((k) => ({ id: k.id, name: k.name, key: k.key })),
+      durationMs: Date.now() - start,
+    }, { headers: { "Access-Control-Allow-Origin": "*" } });
   }
 
   if (path === "/api/combos" && request.method === "POST") {

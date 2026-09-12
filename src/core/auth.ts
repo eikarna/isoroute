@@ -27,9 +27,17 @@ export class AdminAuth {
   }
 
   /**
-   * Verify session token from Authorization header or Cookie
+   * Verify session token from Authorization header or Cookie or Headless Admin Key
    */
-  static async verify(req: Request): Promise<boolean> {
+  static async verify(req: Request, expectedPassword?: string): Promise<boolean> {
+    const targetPassword = expectedPassword || ADMIN_PASSWORD;
+
+    // 1. Direct Headless Admin Key Header (9Router-style automation)
+    const adminKeyHeader = req.headers.get("x-admin-key") || req.headers.get("x-api-key");
+    if (adminKeyHeader && adminKeyHeader.trim() === targetPassword) {
+      return true;
+    }
+
     const authHeader = req.headers.get("Authorization");
     const cookieHeader = req.headers.get("Cookie");
 
@@ -44,7 +52,7 @@ export class AdminAuth {
     if (!token) {
       try {
         const url = new URL(req.url);
-        const queryToken = url.searchParams.get("token");
+        const queryToken = url.searchParams.get("token") || url.searchParams.get("admin_key");
         if (queryToken) token = queryToken.trim();
       } catch {}
     }
@@ -52,7 +60,7 @@ export class AdminAuth {
     if (!token) return false;
 
     // Direct password matching fallback for CLI/curl
-    if (token === ADMIN_PASSWORD) return true;
+    if (token === targetPassword) return true;
 
     try {
       const parts = token.split(".");

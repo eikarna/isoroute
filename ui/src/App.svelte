@@ -163,6 +163,11 @@
   let newProvKey = $state("");
   let newProvType = $state<"openai" | "gemini" | "anthropic">("openai");
 
+  let provDrawerMode = $state<"single" | "bulk">("single");
+  let bulkInput = $state("");
+  let bulkLoading = $state(false);
+  let bulkResultMsg = $state("");
+
   let oauthProviderId = $state("");
   let oauthJson = $state("");
   let oauthStatusMsg = $state("");
@@ -511,6 +516,37 @@
       probeResult = { valid: false, statusCode: 0, latencyMs: 0, error: String(err) };
     } finally {
       probeLoading = false;
+    }
+  }
+
+  async function handleBulkIngest() {
+    if (!bulkInput.trim()) return;
+    bulkLoading = true;
+    bulkResultMsg = "";
+    try {
+      let payload: any = bulkInput.trim();
+      if (payload.startsWith("{") || payload.startsWith("[")) {
+        try {
+          payload = JSON.parse(payload);
+        } catch {}
+      }
+      const res = await fetch("/api/providers/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: typeof payload === "string" ? payload : JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        bulkResultMsg = `✅ Ingested ${data.total} credentials (${data.durationMs}ms)`;
+        bulkInput = "";
+        await reloadStatus();
+      } else {
+        bulkResultMsg = `❌ Error: ${data.error || "Failed"}`;
+      }
+    } catch (err: any) {
+      bulkResultMsg = `❌ Error: ${err.message}`;
+    } finally {
+      bulkLoading = false;
     }
   }
 
@@ -998,45 +1034,76 @@
               </div>
 
               <div class="drawer-box">
-                <div class="drawer-title">Register provider</div>
-                <div class="field">
-                  <label for="p-id">ID</label>
-                  <input id="p-id" bind:value={newProvId} placeholder="google-studio" />
-                </div>
-                <div class="field">
-                  <label for="p-type">Protocol</label>
-                  <select id="p-type" bind:value={newProvType}>
-                    <option value="openai">OpenAI compatible</option>
-                    <option value="gemini">Google Gemini</option>
-                    <option value="anthropic">Anthropic Messages</option>
-                  </select>
-                </div>
-                <div class="field">
-                  <label for="p-name">Name</label>
-                  <input id="p-name" bind:value={newProvName} placeholder="Google AI Studio" />
-                </div>
-                <div class="field">
-                  <label for="p-url">Base URL</label>
-                  <input id="p-url" bind:value={newProvUrl} placeholder="https://generativelanguage.googleapis.com" />
-                </div>
-                <div class="field">
-                  <label for="p-key">API keys (comma separated)</label>
-                  <input id="p-key" type="password" bind:value={newProvKey} placeholder="key-1, key-2" />
-                </div>
-                <div class="action-row">
-                  <button class="btn-brand" onclick={handleAddProvider}>Register</button>
-                  <button class="btn-subtle" disabled={probeLoading || !newProvUrl} onclick={handleProbeProvider}>
-                    {probeLoading ? "Probing..." : "Probe & Test Key"}
-                  </button>
-                </div>
-                {#if probeResult}
-                  <div class="probe-box" class:probe-ok={probeResult.valid} class:probe-err={!probeResult.valid}>
-                    {#if probeResult.valid}
-                      <span class="probe-status">HTTP {probeResult.statusCode} OK · {probeResult.latencyMs}ms · {probeResult.modelCount} models</span>
-                    {:else}
-                      <span class="probe-err-msg">{probeResult.error || "Probe failed"}</span>
-                    {/if}
+                <div class="drawer-header-row">
+                  <div class="drawer-title">{provDrawerMode === 'single' ? "Register provider" : "⚡ Bulk Ingest"}</div>
+                  <div class="subtab-group">
+                    <button class="subtab-btn" class:active={provDrawerMode === 'single'} onclick={() => provDrawerMode = 'single'}>Single</button>
+                    <button class="subtab-btn" class:active={provDrawerMode === 'bulk'} onclick={() => provDrawerMode = 'bulk'}>⚡ Bulk</button>
                   </div>
+                </div>
+
+                {#if provDrawerMode === 'single'}
+                  <div class="field">
+                    <label for="p-id">ID</label>
+                    <input id="p-id" bind:value={newProvId} placeholder="google-studio" />
+                  </div>
+                  <div class="field">
+                    <label for="p-type">Protocol</label>
+                    <select id="p-type" bind:value={newProvType}>
+                      <option value="openai">OpenAI compatible</option>
+                      <option value="gemini">Google Gemini</option>
+                      <option value="anthropic">Anthropic Messages</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="p-name">Name</label>
+                    <input id="p-name" bind:value={newProvName} placeholder="Google AI Studio" />
+                  </div>
+                  <div class="field">
+                    <label for="p-url">Base URL</label>
+                    <input id="p-url" bind:value={newProvUrl} placeholder="https://generativelanguage.googleapis.com" />
+                  </div>
+                  <div class="field">
+                    <label for="p-key">API keys (comma separated)</label>
+                    <input id="p-key" type="password" bind:value={newProvKey} placeholder="key-1, key-2" />
+                  </div>
+                  <div class="action-row">
+                    <button class="btn-brand" onclick={handleAddProvider}>Register</button>
+                    <button class="btn-subtle" disabled={probeLoading || !newProvUrl} onclick={handleProbeProvider}>
+                      {probeLoading ? "Probing..." : "Probe & Test Key"}
+                    </button>
+                  </div>
+                  {#if probeResult}
+                    <div class="probe-box" class:probe-ok={probeResult.valid} class:probe-err={!probeResult.valid}>
+                      {#if probeResult.valid}
+                        <span class="probe-status">HTTP {probeResult.statusCode} OK · {probeResult.latencyMs}ms · {probeResult.modelCount} models</span>
+                      {:else}
+                        <span class="probe-err-msg">{probeResult.error || "Probe failed"}</span>
+                      {/if}
+                    </div>
+                  {/if}
+                {:else}
+                  <div class="bulk-help-banner">
+                    Paste raw text (1 key per line), JSON array, Cookie string (<code>Cookie: ...</code>), or OAuth Session JSON (Cursor/Kiro).
+                  </div>
+                  <div class="field">
+                    <label for="bulk-inp">Raw Payload / Keys</label>
+                    <textarea
+                      id="bulk-inp"
+                      class="bulk-textarea"
+                      bind:value={bulkInput}
+                      placeholder={`nvapi-abcdef1234567890...\nsk-ant-api03-abcdef...\nCookie: session_token=xyz123...\n{"access_token":"...","refreshToken":"..."}`}
+                      rows="7"
+                    ></textarea>
+                  </div>
+                  <div class="action-row">
+                    <button class="btn-brand" disabled={bulkLoading || !bulkInput.trim()} onclick={handleBulkIngest}>
+                      {bulkLoading ? "Ingesting..." : "⚡ Ingest Batch"}
+                    </button>
+                  </div>
+                  {#if bulkResultMsg}
+                    <div class="bulk-result-badge">{bulkResultMsg}</div>
+                  {/if}
                 {/if}
               </div>
             </div>
@@ -1821,6 +1888,67 @@
   }
   .wide-box { max-width: 640px; }
   .drawer-title { font-size: 12px; font-weight: 600; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+  .drawer-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .drawer-header-row .drawer-title { padding-bottom: 0; border-bottom: none; }
+  .subtab-group {
+    display: flex;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 2px;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+  }
+  .subtab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .subtab-btn.active {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+  }
+  .bulk-help-banner {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed var(--border-subtle);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+  .bulk-help-banner code {
+    color: var(--accent);
+  }
+  .bulk-textarea {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre;
+    resize: vertical;
+  }
+  .bulk-result-badge {
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: rgba(34, 197, 94, 0.08);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: #4ade80;
+    font-variant-numeric: tabular-nums;
+  }
 
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field label {

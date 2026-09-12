@@ -453,6 +453,120 @@ export class SqliteStorageAdapter implements StorageAdapter {
     };
   }
 
+  // High-performance batch transaction writes for 20k+ entries
+  async saveProvidersBatch(providers: Provider[]): Promise<number> {
+    if (providers.length === 0) return 0;
+    const stmt = this.db.prepare(`
+      INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        base_url = excluded.base_url,
+        api_key = excluded.api_key,
+        type = excluded.type,
+        headers_json = excluded.headers_json,
+        oauth_json = excluded.oauth_json,
+        enabled = excluded.enabled;
+    `);
+
+    const runTx = this.db.transaction((items: Provider[]) => {
+      for (const p of items) {
+        stmt.run(
+          p.id,
+          p.name,
+          p.baseUrl,
+          p.apiKey ?? null,
+          p.type || "openai",
+          p.headers ? JSON.stringify(p.headers) : null,
+          p.oauth ? JSON.stringify(p.oauth) : null,
+          p.enabled ? 1 : 0
+        );
+      }
+    });
+
+    runTx(providers);
+    return providers.length;
+  }
+
+  async saveCombosBatch(combos: ModelCombo[]): Promise<number> {
+    if (combos.length === 0) return 0;
+    const stmt = this.db.prepare(`
+      INSERT INTO combos (id, display_name, description, targets_json, enabled)
+      VALUES (?1, ?2, ?3, ?4, ?5)
+      ON CONFLICT(id) DO UPDATE SET
+        display_name = excluded.display_name,
+        description = excluded.description,
+        targets_json = excluded.targets_json,
+        enabled = excluded.enabled;
+    `);
+
+    const runTx = this.db.transaction((items: ModelCombo[]) => {
+      for (const c of items) {
+        stmt.run(
+          c.id,
+          c.displayName,
+          c.description ?? null,
+          JSON.stringify(c.targets),
+          c.enabled ? 1 : 0
+        );
+      }
+    });
+
+    runTx(combos);
+    return combos.length;
+  }
+
+  async saveKeysBatch(keys: ApiKeyRecord[]): Promise<number> {
+    if (keys.length === 0) return 0;
+    const stmt = this.db.prepare(`
+      INSERT INTO api_keys (
+        id, name, key, created_at, expires_at,
+        max_requests, max_tokens, max_prompt_tokens, max_completion_tokens,
+        used_requests, used_tokens, used_prompt_tokens, used_completion_tokens,
+        required_headers_json, required_body_json, allowed_models_json, enabled
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        key = excluded.key,
+        expires_at = excluded.expires_at,
+        max_requests = excluded.max_requests,
+        max_tokens = excluded.max_tokens,
+        max_prompt_tokens = excluded.max_prompt_tokens,
+        max_completion_tokens = excluded.max_completion_tokens,
+        required_headers_json = excluded.required_headers_json,
+        required_body_json = excluded.required_body_json,
+        allowed_models_json = excluded.allowed_models_json,
+        enabled = excluded.enabled;
+    `);
+
+    const runTx = this.db.transaction((items: ApiKeyRecord[]) => {
+      for (const k of items) {
+        stmt.run(
+          k.id,
+          k.name,
+          k.key,
+          k.createdAt,
+          k.expiresAt ?? null,
+          k.maxRequests ?? null,
+          k.maxTokens ?? null,
+          k.maxPromptTokens ?? null,
+          k.maxCompletionTokens ?? null,
+          k.usedRequests ?? 0,
+          k.usedTokens ?? 0,
+          k.usedPromptTokens ?? 0,
+          k.usedCompletionTokens ?? 0,
+          k.requiredHeaders ? JSON.stringify(k.requiredHeaders) : null,
+          k.requiredBodyKeywords ? JSON.stringify(k.requiredBodyKeywords) : null,
+          k.allowedModels ? JSON.stringify(k.allowedModels) : null,
+          k.enabled ? 1 : 0
+        );
+      }
+    });
+
+    runTx(keys);
+    return keys.length;
+  }
+
   close(): void {
     this.db.close();
   }

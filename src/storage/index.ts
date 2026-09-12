@@ -51,6 +51,11 @@ export interface StorageAdapter {
   getRule(id: string): Promise<RouteRule | null>;
   saveRule(rule: RouteRule): Promise<void>;
   deleteRule(id: string): Promise<void>;
+
+  // Bulk Batch Storage Operations (High-Performance for 20k+ entries)
+  saveProvidersBatch?(providers: Provider[]): Promise<number>;
+  saveCombosBatch?(combos: ModelCombo[]): Promise<number>;
+  saveKeysBatch?(keys: ApiKeyRecord[]): Promise<number>;
 }
 
 /**
@@ -213,5 +218,21 @@ export class MemoryStorageAdapter implements StorageAdapter {
 
   async deleteRule(id: string): Promise<void> {
     this.rules.delete(id);
+  }
+
+  // Bulk Ingestion Batch Operations
+  async saveProvidersBatch(providers: Provider[]): Promise<number> {
+    for (const p of providers) this.providers.set(p.id, p);
+    return providers.length;
+  }
+
+  async saveCombosBatch(combos: ModelCombo[]): Promise<number> {
+    for (const c of combos) this.combos.set(c.id, c);
+    return combos.length;
+  }
+
+  async saveKeysBatch(keys: ApiKeyRecord[]): Promise<number> {
+    for (const k of keys) this.keys.set(k.key, k);
+    return keys.length;
   }
 }

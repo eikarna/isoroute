@@ -525,4 +525,121 @@ export class TursoStorageAdapter implements StorageAdapter {
   async deleteRule(id: string): Promise<void> {
     await this.execute("DELETE FROM route_rules WHERE id = ?", [id]);
   }
+
+  // Chunked batch operations for 20k+ entries in Turso
+  async saveProvidersBatch(providers: Provider[]): Promise<number> {
+    if (providers.length === 0) return 0;
+    const chunkSize = 100;
+    for (let i = 0; i < providers.length; i += chunkSize) {
+      const chunk = providers.slice(i, i + chunkSize);
+      const requests = chunk.map((p) => ({
+        type: "execute",
+        stmt: {
+          sql: `INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  name = excluded.name,
+                  base_url = excluded.base_url,
+                  api_key = excluded.api_key,
+                  type = excluded.type,
+                  headers_json = excluded.headers_json,
+                  oauth_json = excluded.oauth_json,
+                  enabled = excluded.enabled;`,
+          args: [
+            { type: "text", value: p.id },
+            { type: "text", value: p.name },
+            { type: "text", value: p.baseUrl },
+            p.apiKey ? { type: "text", value: p.apiKey } : { type: "null" },
+            { type: "text", value: p.type || "openai" },
+            p.headers ? { type: "text", value: JSON.stringify(p.headers) } : { type: "null" },
+            p.oauth ? { type: "text", value: JSON.stringify(p.oauth) } : { type: "null" },
+            { type: "integer", value: p.enabled ? 1 : 0 },
+          ],
+        },
+      }));
+      await this.pipeline(requests);
+    }
+    return providers.length;
+  }
+
+  async saveCombosBatch(combos: ModelCombo[]): Promise<number> {
+    if (combos.length === 0) return 0;
+    const chunkSize = 100;
+    for (let i = 0; i < combos.length; i += chunkSize) {
+      const chunk = combos.slice(i, i + chunkSize);
+      const requests = chunk.map((c) => ({
+        type: "execute",
+        stmt: {
+          sql: `INSERT INTO combos (id, display_name, description, targets_json, enabled)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  display_name = excluded.display_name,
+                  description = excluded.description,
+                  targets_json = excluded.targets_json,
+                  enabled = excluded.enabled;`,
+          args: [
+            { type: "text", value: c.id },
+            { type: "text", value: c.displayName },
+            c.description ? { type: "text", value: c.description } : { type: "null" },
+            { type: "text", value: JSON.stringify(c.targets) },
+            { type: "integer", value: c.enabled ? 1 : 0 },
+          ],
+        },
+      }));
+      await this.pipeline(requests);
+    }
+    return combos.length;
+  }
+
+  async saveKeysBatch(keys: ApiKeyRecord[]): Promise<number> {
+    if (keys.length === 0) return 0;
+    const chunkSize = 100;
+    for (let i = 0; i < keys.length; i += chunkSize) {
+      const chunk = keys.slice(i, i + chunkSize);
+      const requests = chunk.map((k) => ({
+        type: "execute",
+        stmt: {
+          sql: `INSERT INTO api_keys (
+                  id, name, key, created_at, expires_at,
+                  max_requests, max_tokens, max_prompt_tokens, max_completion_tokens,
+                  used_requests, used_tokens, used_prompt_tokens, used_completion_tokens,
+                  required_headers_json, required_body_json, allowed_models_json, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  name = excluded.name,
+                  key = excluded.key,
+                  expires_at = excluded.expires_at,
+                  max_requests = excluded.max_requests,
+                  max_tokens = excluded.max_tokens,
+                  max_prompt_tokens = excluded.max_prompt_tokens,
+                  max_completion_tokens = excluded.max_completion_tokens,
+                  required_headers_json = excluded.required_headers_json,
+                  required_body_json = excluded.required_body_json,
+                  allowed_models_json = excluded.allowed_models_json,
+                  enabled = excluded.enabled;`,
+          args: [
+            { type: "text", value: k.id },
+            { type: "text", value: k.name },
+            { type: "text", value: k.key },
+            { type: "integer", value: k.createdAt },
+            k.expiresAt ? { type: "integer", value: k.expiresAt } : { type: "null" },
+            k.maxRequests ? { type: "integer", value: k.maxRequests } : { type: "null" },
+            k.maxTokens ? { type: "integer", value: k.maxTokens } : { type: "null" },
+            k.maxPromptTokens ? { type: "integer", value: k.maxPromptTokens } : { type: "null" },
+            k.maxCompletionTokens ? { type: "integer", value: k.maxCompletionTokens } : { type: "null" },
+            { type: "integer", value: k.usedRequests || 0 },
+            { type: "integer", value: k.usedTokens || 0 },
+            { type: "integer", value: k.usedPromptTokens || 0 },
+            { type: "integer", value: k.usedCompletionTokens || 0 },
+            k.requiredHeaders ? { type: "text", value: JSON.stringify(k.requiredHeaders) } : { type: "null" },
+            k.requiredBodyKeywords ? { type: "text", value: JSON.stringify(k.requiredBodyKeywords) } : { type: "null" },
+            k.allowedModels ? { type: "text", value: JSON.stringify(k.allowedModels) } : { type: "null" },
+            { type: "integer", value: k.enabled ? 1 : 0 },
+          ],
+        },
+      }));
+      await this.pipeline(requests);
+    }
+    return keys.length;
+  }
 }
