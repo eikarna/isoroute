@@ -689,7 +689,7 @@
       <div class="auth-head">
         <span class="brand-mark">{@render icon(ICONS.bolt, 16)}</span>
         <div>
-          <h1>EdgeRouter</h1>
+          <h1>IsoRoute</h1>
           <span class="auth-sub">Gateway control plane</span>
         </div>
       </div>
@@ -716,7 +716,7 @@
       <div class="sidebar-brand">
         <span class="brand-mark">{@render icon(ICONS.bolt, 15)}</span>
         <div class="brand-titles">
-          <span class="brand-name">EdgeRouter</span>
+          <span class="brand-name">IsoRoute</span>
           <span class="brand-tag">v0.2.0</span>
         </div>
       </div>
