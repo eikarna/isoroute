@@ -1,0 +1,15 @@
+{
+  "name": "edge-router",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "cli": "bun run src/cli.ts",
+    "build:ui": "cd ui && bun run build",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
