@@ -193,6 +193,18 @@
   let importLoading = $state(false);
   let importResultMsg = $state("");
 
+  // Mobile Collapsible Drawer State (Opsi B: Top Accordion)
+  let mobileDrawerOpen = $state<Record<string, boolean>>({
+    providers: false,
+    combos: false,
+    keys: false,
+    rules: false,
+  });
+
+  function toggleMobileDrawer(tab: string) {
+    mobileDrawerOpen[tab] = !mobileDrawerOpen[tab];
+  }
+
   let playModel = $state("");
   let playPrompt = $state("Summarize what an isomorphic edge gateway does in two sentences.");
   let playStream = $state(true);
@@ -1167,15 +1179,21 @@
                 {/if}
               </div>
 
-              <div class="drawer-box">
+              <div class="drawer-box" class:mobile-open={mobileDrawerOpen['providers']}>
                 <div class="drawer-header-row">
-                  <div class="drawer-title">{provDrawerMode === 'single' ? "Register provider" : "Bulk Ingest"}</div>
+                  <div class="drawer-title-group">
+                    <div class="drawer-title">{provDrawerMode === 'single' ? "Register provider" : "Bulk Ingest"}</div>
+                    <button type="button" class="drawer-mobile-btn mobile-only" onclick={() => toggleMobileDrawer('providers')}>
+                      {mobileDrawerOpen['providers'] ? "Hide" : "+ Add / Bulk"}
+                    </button>
+                  </div>
                   <div class="subtab-group">
-                    <button class="subtab-btn" class:active={provDrawerMode === 'single'} onclick={() => provDrawerMode = 'single'}>Single</button>
-                    <button class="subtab-btn" class:active={provDrawerMode === 'bulk'} onclick={() => provDrawerMode = 'bulk'}>Bulk</button>
+                    <button class="subtab-btn" class:active={provDrawerMode === 'single'} onclick={() => { provDrawerMode = 'single'; mobileDrawerOpen['providers'] = true; }}>Single</button>
+                    <button class="subtab-btn" class:active={provDrawerMode === 'bulk'} onclick={() => { provDrawerMode = 'bulk'; mobileDrawerOpen['providers'] = true; }}>Bulk</button>
                   </div>
                 </div>
 
+                <div class="drawer-collapsible-body">
                 {#if provDrawerMode === 'single'}
                   <div class="field">
                     <label for="p-id">ID</label>
@@ -1312,6 +1330,7 @@
                     <div class="bulk-result-badge" class:badge-err={bulkResultMsg.startsWith('[Error]')}>{bulkResultMsg}</div>
                   {/if}
                 {/if}
+                </div>
               </div>
             </div>
           </div>
@@ -1349,36 +1368,46 @@
                 {/if}
               </div>
 
-              <div class="drawer-box">
-                <div class="drawer-title">Create combo</div>
-                <div class="field">
-                  <label for="c-id">ID</label>
-                  <input id="c-id" bind:value={newComboId} placeholder="coder-latest" />
+              <div class="drawer-box" class:mobile-open={mobileDrawerOpen['combos']}>
+                <div class="drawer-header-row">
+                  <div class="drawer-title-group">
+                    <div class="drawer-title">Create combo</div>
+                    <button type="button" class="drawer-mobile-btn mobile-only" onclick={() => toggleMobileDrawer('combos')}>
+                      {mobileDrawerOpen['combos'] ? "Hide" : "+ Create Combo"}
+                    </button>
+                  </div>
                 </div>
-                <div class="field">
-                  <label for="c-name">Name</label>
-                  <input id="c-name" bind:value={newComboName} placeholder="Coder ladder" />
+
+                <div class="drawer-collapsible-body">
+                  <div class="field">
+                    <label for="c-id">ID</label>
+                    <input id="c-id" bind:value={newComboId} placeholder="coder-latest" />
+                  </div>
+                  <div class="field">
+                    <label for="c-name">Name</label>
+                    <input id="c-name" bind:value={newComboName} placeholder="Coder ladder" />
+                  </div>
+                  <div class="field">
+                    <label for="c-prov">Provider</label>
+                    <select id="c-prov" bind:value={newComboProvider}>
+                      {#each providers as prov}
+                        <option value={prov.id}>{prov.name} ({prov.id})</option>
+                      {/each}
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="c-model">
+                      Upstream model
+                      {#if fetchingModels}<span class="hint">discovering…</span>
+                      {:else if availableModels.length > 0}<span class="hint">{availableModels.length} found</span>{/if}
+                    </label>
+                    <input id="c-model" list="models-dl" bind:value={newComboModel} placeholder="gemini-3-flash" />
+                    <datalist id="models-dl">
+                      {#each availableModels as m}<option value={m}></option>{/each}
+                    </datalist>
+                  </div>
+                  <button class="btn-brand" onclick={handleAddCombo}>Create</button>
                 </div>
-                <div class="field">
-                  <label for="c-prov">Provider</label>
-                  <select id="c-prov" bind:value={newComboProvider}>
-                    {#each providers as prov}
-                      <option value={prov.id}>{prov.name} ({prov.id})</option>
-                    {/each}
-                  </select>
-                </div>
-                <div class="field">
-                  <label for="c-model">
-                    Upstream model
-                    {#if fetchingModels}<span class="hint">discovering…</span>
-                    {:else if availableModels.length > 0}<span class="hint">{availableModels.length} found</span>{/if}
-                  </label>
-                  <input id="c-model" list="models-dl" bind:value={newComboModel} placeholder="gemini-3-flash" />
-                  <datalist id="models-dl">
-                    {#each availableModels as m}<option value={m}></option>{/each}
-                  </datalist>
-                </div>
-                <button class="btn-brand" onclick={handleAddCombo}>Create</button>
               </div>
             </div>
           </div>
@@ -1436,8 +1465,17 @@
                 {/if}
               </div>
 
-              <div class="drawer-box">
-                <div class="drawer-title">Issue Consumer API Key</div>
+              <div class="drawer-box" class:mobile-open={mobileDrawerOpen['keys']}>
+                <div class="drawer-header-row">
+                  <div class="drawer-title-group">
+                    <div class="drawer-title">Issue Consumer API Key</div>
+                    <button type="button" class="drawer-mobile-btn mobile-only" onclick={() => toggleMobileDrawer('keys')}>
+                      {mobileDrawerOpen['keys'] ? "Hide" : "+ Issue Key"}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="drawer-collapsible-body">
                 <div class="field">
                   <label for="k-name">Key Name / Client ID</label>
                   <input id="k-name" bind:value={newKeyName} placeholder="production-mobile-app" />
@@ -1482,6 +1520,7 @@
                   <input id="k-body" bind:value={newKeyBodyKw} placeholder="authorized_client, v2" />
                 </div>
                 <button class="btn-brand" onclick={handleAddKey}>Generate API Key</button>
+                </div>
               </div>
             </div>
           </div>
@@ -1508,21 +1547,31 @@
                 {/if}
               </div>
 
-              <div class="drawer-box">
-                <div class="drawer-title">Create Force Routing Rule</div>
-                <div class="field">
-                  <label for="r-pat">Match Pattern (Wildcard / Regex)</label>
-                  <input id="r-pat" bind:value={newRulePattern} placeholder="claude-*-opus / *high / claude*" />
+              <div class="drawer-box" class:mobile-open={mobileDrawerOpen['rules']}>
+                <div class="drawer-header-row">
+                  <div class="drawer-title-group">
+                    <div class="drawer-title">Create Force Routing Rule</div>
+                    <button type="button" class="drawer-mobile-btn mobile-only" onclick={() => toggleMobileDrawer('rules')}>
+                      {mobileDrawerOpen['rules'] ? "Hide" : "+ Add Rule"}
+                    </button>
+                  </div>
                 </div>
-                <div class="field">
-                  <label for="r-tgt">Rewrite Target (Model / Combo / Group)</label>
-                  <input id="r-tgt" bind:value={newRuleTarget} placeholder="gemini-$1-latest / deepseek-v4.1-flash / gemini*" />
+
+                <div class="drawer-collapsible-body">
+                  <div class="field">
+                    <label for="r-pat">Match Pattern (Wildcard / Regex)</label>
+                    <input id="r-pat" bind:value={newRulePattern} placeholder="claude-*-opus / *high / claude*" />
+                  </div>
+                  <div class="field">
+                    <label for="r-tgt">Rewrite Target (Model / Combo / Group)</label>
+                    <input id="r-tgt" bind:value={newRuleTarget} placeholder="gemini-$1-latest / deepseek-v4.1-flash / gemini*" />
+                  </div>
+                  <div class="field">
+                    <label for="r-prio">Priority (higher runs first)</label>
+                    <input id="r-prio" type="number" bind:value={newRulePriority} placeholder="10" />
+                  </div>
+                  <button class="btn-brand" onclick={handleAddRule}>Add Routing Rule</button>
                 </div>
-                <div class="field">
-                  <label for="r-prio">Priority (higher runs first)</label>
-                  <input id="r-prio" type="number" bind:value={newRulePriority} placeholder="10" />
-                </div>
-                <button class="btn-brand" onclick={handleAddRule}>Add Routing Rule</button>
               </div>
             </div>
           </div>
@@ -2153,6 +2202,33 @@
   }
   .wide-box { max-width: 640px; }
   .drawer-title { font-size: 12px; font-weight: 600; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+  .drawer-collapsible-body {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+    width: 100%;
+  }
+  .drawer-title-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .drawer-mobile-btn {
+    display: none;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    cursor: pointer;
+    line-height: 1.4;
+  }
+  .drawer-mobile-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
   .drawer-header-row {
     display: flex;
     align-items: center;
@@ -2486,8 +2562,31 @@
     .desktop-only { display: none !important; }
     .mobile-only { display: flex !important; }
 
-    .split-layout,
+    .split-layout {
+      display: flex;
+      flex-direction: column;
+    }
     .playground-layout { grid-template-columns: 1fr; }
+    .drawer-box {
+      order: -1;
+      width: 100%;
+      margin-bottom: 12px;
+      padding: 10px 12px;
+    }
+    .drawer-mobile-btn {
+      display: inline-flex !important;
+    }
+    .drawer-box:not(.mobile-open) {
+      padding: 8px 12px;
+    }
+    .drawer-box:not(.mobile-open) .drawer-header-row {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    .drawer-box:not(.mobile-open) .drawer-collapsible-body {
+      display: none !important;
+    }
+
     .route-line { grid-template-columns: 1fr; gap: 3px; }
     .route-load { justify-self: start; }
     .toolbar { gap: 8px; }
