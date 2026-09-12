@@ -1,5 +1,7 @@
 // Storage Adapter Abstraction: Stateless & Edge-First
 import type { Provider, ModelCombo, TelemetryLog } from "../types";
+import type { ApiKeyRecord } from "../core/keys";
+import type { RouteRule } from "../core/rewrite";
 
 export interface LogQueryOptions {
   limit?: number;
@@ -36,6 +38,19 @@ export interface StorageAdapter {
   getLogs(options?: LogQueryOptions | number): Promise<TelemetryLog[]>;
   clearLogs(): Promise<void>;
   getMetrics(options?: MetricQueryOptions): Promise<StorageMetrics>;
+
+  // Consumer API Keys & Quota Billing
+  getKeys(): Promise<ApiKeyRecord[]>;
+  getKey(keyOrId: string): Promise<ApiKeyRecord | null>;
+  saveKey(key: ApiKeyRecord): Promise<void>;
+  deleteKey(id: string): Promise<void>;
+  deductKeyUsage(id: string, usage: { requests?: number; tokens?: number; promptTokens?: number; completionTokens?: number }): Promise<void>;
+
+  // Dynamic Wildcard & Regex Force Routing Rules
+  getRules(): Promise<RouteRule[]>;
+  getRule(id: string): Promise<RouteRule | null>;
+  saveRule(rule: RouteRule): Promise<void>;
+  deleteRule(id: string): Promise<void>;
 }
 
 /**
@@ -44,6 +59,8 @@ export interface StorageAdapter {
 export class MemoryStorageAdapter implements StorageAdapter {
   private providers = new Map<string, Provider>();
   private combos = new Map<string, ModelCombo>();
+  private keys = new Map<string, ApiKeyRecord>();
+  private rules = new Map<string, RouteRule>();
   private logs: TelemetryLog[] = [];
   private totalTokens = 0;
 
@@ -149,5 +166,52 @@ export class MemoryStorageAdapter implements StorageAdapter {
     }
 
     return { totalRequests, totalTokens, promptTokens, completionTokens };
+  }
+
+  // Consumer API Keys
+  async getKeys(): Promise<ApiKeyRecord[]> {
+    return Array.from(this.keys.values());
+  }
+
+  async getKey(keyOrId: string): Promise<ApiKeyRecord | null> {
+    if (this.keys.has(keyOrId)) return this.keys.get(keyOrId)!;
+    for (const k of this.keys.values()) {
+      if (k.key === keyOrId) return k;
+    }
+    return null;
+  }
+
+  async saveKey(key: ApiKeyRecord): Promise<void> {
+    this.keys.set(key.id, key);
+  }
+
+  async deleteKey(id: string): Promise<void> {
+    this.keys.delete(id);
+  }
+
+  async deductKeyUsage(id: string, usage: { requests?: number; tokens?: number; promptTokens?: number; completionTokens?: number }): Promise<void> {
+    const k = this.keys.get(id);
+    if (!k) return;
+    k.usedRequests += usage.requests ?? 1;
+    k.usedTokens += usage.tokens ?? 0;
+    k.usedPromptTokens += usage.promptTokens ?? 0;
+    k.usedCompletionTokens += usage.completionTokens ?? 0;
+  }
+
+  // Route Rules
+  async getRules(): Promise<RouteRule[]> {
+    return Array.from(this.rules.values()).sort((a, b) => (b.priority || 0) - (a.priority || 0));
+  }
+
+  async getRule(id: string): Promise<RouteRule | null> {
+    return this.rules.get(id) ?? null;
+  }
+
+  async saveRule(rule: RouteRule): Promise<void> {
+    this.rules.set(rule.id, rule);
+  }
+
+  async deleteRule(id: string): Promise<void> {
+    this.rules.delete(id);
   }
 }

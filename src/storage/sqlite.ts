@@ -2,6 +2,8 @@
 import { Database } from "bun:sqlite";
 import type { StorageAdapter } from "./index";
 import type { ModelCombo, Provider, TelemetryLog } from "../types";
+import type { ApiKeyRecord } from "../core/keys";
+import type { RouteRule } from "../core/rewrite";
 
 export class SqliteStorageAdapter implements StorageAdapter {
   private db: Database;
@@ -62,6 +64,40 @@ export class SqliteStorageAdapter implements StorageAdapter {
     } catch {}
 
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON telemetry_logs (timestamp DESC);`);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        key TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER,
+        max_requests INTEGER,
+        max_tokens INTEGER,
+        max_prompt_tokens INTEGER,
+        max_completion_tokens INTEGER,
+        used_requests INTEGER NOT NULL DEFAULT 0,
+        used_tokens INTEGER NOT NULL DEFAULT 0,
+        used_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        used_completion_tokens INTEGER NOT NULL DEFAULT 0,
+        required_headers_json TEXT,
+        required_body_json TEXT,
+        allowed_models_json TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1
+      );
+    `);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_keys_key ON api_keys (key);`);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS route_rules (
+        id TEXT PRIMARY KEY,
+        pattern TEXT NOT NULL,
+        target TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 0,
+        enabled INTEGER NOT NULL DEFAULT 1
+      );
+    `);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_rules_prio ON route_rules (priority DESC);`);
   }
 
   async getProviders(): Promise<Provider[]> {
@@ -274,6 +310,146 @@ export class SqliteStorageAdapter implements StorageAdapter {
       totalTokens: row?.total_tokens ?? 0,
       promptTokens: row?.prompt_tokens ?? 0,
       completionTokens: row?.completion_tokens ?? 0,
+    };
+  }
+
+  // Consumer API Keys
+  async getKeys(): Promise<ApiKeyRecord[]> {
+    const rows = this.db.query("SELECT * FROM api_keys ORDER BY created_at DESC").all() as any[];
+    return rows.map((r) => this.mapApiKey(r));
+  }
+
+  async getKey(keyOrId: string): Promise<ApiKeyRecord | null> {
+    const r = this.db.query("SELECT * FROM api_keys WHERE id = ?1 OR key = ?1 LIMIT 1").get(keyOrId) as any;
+    if (!r) return null;
+    return this.mapApiKey(r);
+  }
+
+  async saveKey(k: ApiKeyRecord): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT INTO api_keys (
+        id, name, key, created_at, expires_at,
+        max_requests, max_tokens, max_prompt_tokens, max_completion_tokens,
+        used_requests, used_tokens, used_prompt_tokens, used_completion_tokens,
+        required_headers_json, required_body_json, allowed_models_json, enabled
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        key = excluded.key,
+        expires_at = excluded.expires_at,
+        max_requests = excluded.max_requests,
+        max_tokens = excluded.max_tokens,
+        max_prompt_tokens = excluded.max_prompt_tokens,
+        max_completion_tokens = excluded.max_completion_tokens,
+        required_headers_json = excluded.required_headers_json,
+        required_body_json = excluded.required_body_json,
+        allowed_models_json = excluded.allowed_models_json,
+        enabled = excluded.enabled;
+    `);
+
+    stmt.run(
+      k.id,
+      k.name,
+      k.key,
+      k.createdAt,
+      k.expiresAt ?? null,
+      k.maxRequests ?? null,
+      k.maxTokens ?? null,
+      k.maxPromptTokens ?? null,
+      k.maxCompletionTokens ?? null,
+      k.usedRequests ?? 0,
+      k.usedTokens ?? 0,
+      k.usedPromptTokens ?? 0,
+      k.usedCompletionTokens ?? 0,
+      k.requiredHeaders ? JSON.stringify(k.requiredHeaders) : null,
+      k.requiredBodyKeywords ? JSON.stringify(k.requiredBodyKeywords) : null,
+      k.allowedModels ? JSON.stringify(k.allowedModels) : null,
+      k.enabled ? 1 : 0
+    );
+  }
+
+  async deleteKey(id: string): Promise<void> {
+    this.db.prepare("DELETE FROM api_keys WHERE id = ?1").run(id);
+  }
+
+  async deductKeyUsage(id: string, usage: { requests?: number; tokens?: number; promptTokens?: number; completionTokens?: number }): Promise<void> {
+    const stmt = this.db.prepare(`
+      UPDATE api_keys SET
+        used_requests = used_requests + ?2,
+        used_tokens = used_tokens + ?3,
+        used_prompt_tokens = used_prompt_tokens + ?4,
+        used_completion_tokens = used_completion_tokens + ?5
+      WHERE id = ?1
+    `);
+    stmt.run(
+      id,
+      usage.requests ?? 1,
+      usage.tokens ?? 0,
+      usage.promptTokens ?? 0,
+      usage.completionTokens ?? 0
+    );
+  }
+
+  // Dynamic Route Rules
+  async getRules(): Promise<RouteRule[]> {
+    const rows = this.db.query("SELECT * FROM route_rules ORDER BY priority DESC").all() as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      pattern: r.pattern,
+      target: r.target,
+      priority: r.priority,
+      enabled: Boolean(r.enabled),
+    }));
+  }
+
+  async getRule(id: string): Promise<RouteRule | null> {
+    const r = this.db.query("SELECT * FROM route_rules WHERE id = ?1 LIMIT 1").get(id) as any;
+    if (!r) return null;
+    return {
+      id: r.id,
+      pattern: r.pattern,
+      target: r.target,
+      priority: r.priority,
+      enabled: Boolean(r.enabled),
+    };
+  }
+
+  async saveRule(rule: RouteRule): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT INTO route_rules (id, pattern, target, priority, enabled)
+      VALUES (?1, ?2, ?3, ?4, ?5)
+      ON CONFLICT(id) DO UPDATE SET
+        pattern = excluded.pattern,
+        target = excluded.target,
+        priority = excluded.priority,
+        enabled = excluded.enabled;
+    `);
+    stmt.run(rule.id, rule.pattern, rule.target, rule.priority ?? 0, (rule.enabled ?? true) ? 1 : 0);
+  }
+
+  async deleteRule(id: string): Promise<void> {
+    this.db.prepare("DELETE FROM route_rules WHERE id = ?1").run(id);
+  }
+
+  private mapApiKey(r: any): ApiKeyRecord {
+    return {
+      id: r.id,
+      name: r.name,
+      key: r.key,
+      createdAt: r.created_at,
+      expiresAt: r.expires_at ?? undefined,
+      maxRequests: r.max_requests ?? undefined,
+      maxTokens: r.max_tokens ?? undefined,
+      maxPromptTokens: r.max_prompt_tokens ?? undefined,
+      maxCompletionTokens: r.max_completion_tokens ?? undefined,
+      usedRequests: r.used_requests ?? 0,
+      usedTokens: r.used_tokens ?? 0,
+      usedPromptTokens: r.used_prompt_tokens ?? 0,
+      usedCompletionTokens: r.used_completion_tokens ?? 0,
+      requiredHeaders: r.required_headers_json ? JSON.parse(r.required_headers_json) : undefined,
+      requiredBodyKeywords: r.required_body_json ? JSON.parse(r.required_body_json) : undefined,
+      allowedModels: r.allowed_models_json ? JSON.parse(r.allowed_models_json) : undefined,
+      enabled: Boolean(r.enabled),
     };
   }
 

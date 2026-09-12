@@ -40,6 +40,35 @@
     error?: string;
   }
 
+
+  interface ApiKeyRecord {
+    id: string;
+    name: string;
+    key: string;
+    createdAt: number;
+    expiresAt?: number;
+    maxRequests?: number;
+    maxTokens?: number;
+    maxPromptTokens?: number;
+    maxCompletionTokens?: number;
+    usedRequests: number;
+    usedTokens: number;
+    usedPromptTokens: number;
+    usedCompletionTokens: number;
+    requiredHeaders?: Record<string, string>;
+    requiredBodyKeywords?: string[];
+    allowedModels?: string[];
+    enabled: boolean;
+  }
+
+  interface RouteRule {
+    id: string;
+    pattern: string;
+    target: string;
+    priority: number;
+    enabled: boolean;
+  }
+
   interface Metrics {
     totalRequests: number;
     totalTokens: number;
@@ -55,12 +84,15 @@
     logs: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
     playground: "M4 17l6-5-6-5M12 19h8",
     oauth: "M21 2l-2 2M15.5 7.5l3 3L22 7l-3-3M13.39 11.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.778-7.778z",
+    keys: "M21 2l-2 2M15.5 7.5l3 3L22 7l-3-3M13.39 11.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.778-7.778z",
+    rules: "M4 6h16M4 12h10M4 18h14M18 9l3 3-3 3",
+    probe: "M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83",
     bolt: "M13 2 4.09 12.97A1 1 0 0 0 4.86 14.6H11l-1 7.4 8.91-10.97A1 1 0 0 0 18.14 9.4H12z",
     sortAsc: "M11 5h10M11 9h7M11 13h4M3 17l3 3 3-3M6 18V4",
     sortDesc: "M11 5h4M11 9h7M11 13h10M3 7l3-3 3 3M6 6v14",
   };
 
-  type Tab = "overview" | "providers" | "combos" | "logs" | "playground" | "oauth";
+  type Tab = "overview" | "providers" | "combos" | "keys" | "rules" | "logs" | "playground" | "oauth";
 
   let activeTab = $state<Tab>("overview");
   let combos = $state<ModelCombo[]>([]);
@@ -68,6 +100,34 @@
   let logs = $state<TelemetryLog[]>([]);
   let metrics = $state<Metrics>({ totalRequests: 0, totalTokens: 0, promptTokens: 0, completionTokens: 0 });
   let loading = $state(true);
+  let apiKeys = $state<ApiKeyRecord[]>([]);
+  let routeRules = $state<RouteRule[]>([]);
+
+  // Provider Probe state
+  let probeLoading = $state(false);
+  let probeResult = $state<{ valid: boolean; statusCode: number; latencyMs: number; modelCount?: number; error?: string } | null>(null);
+
+  // Key creation state
+  let newKeyName = $state("");
+  let newKeyExpiry = $state("never");
+  let newKeyMaxReq = $state<number | undefined>(undefined);
+  let newKeyMaxTokens = $state<number | undefined>(undefined);
+  let newKeyMaxPrompt = $state<number | undefined>(undefined);
+  let newKeyMaxComp = $state<number | undefined>(undefined);
+  let newKeyHeaders = $state("");
+  let newKeyBodyKw = $state("");
+  let newKeyModels = $state("");
+
+  // Rule creation state
+  let newRulePattern = $state("");
+  let newRuleTarget = $state("");
+  let newRulePriority = $state(10);
+
+  // Playground state extensions
+  let playSystem = $state("You are a concise, technical assistant.");
+  let playTemp = $state(0.7);
+  let playMaxTokens = $state(1000);
+
 
   // Auth
   let isAuthenticated = $state(false);
@@ -260,10 +320,12 @@
     const qs = `${rangeParams()}&sortBy=${sortBy}&order=${sortOrder}&limit=${limit}`;
     try {
       if (full) {
-        const [statusRes, combosRes, provRes] = await Promise.all([
+        const [statusRes, combosRes, provRes, keysRes, rulesRes] = await Promise.all([
           fetch(`/api/status?${qs}`, { headers: getAuthHeaders() }),
           fetch("/api/combos", { headers: getAuthHeaders() }),
           fetch("/api/providers", { headers: getAuthHeaders() }),
+          fetch("/api/keys", { headers: getAuthHeaders() }),
+          fetch("/api/rules", { headers: getAuthHeaders() }),
         ]);
 
         if (statusRes.ok) {
@@ -286,6 +348,14 @@
           providers = p.providers || [];
           if (providers.length > 0 && !newComboProvider) newComboProvider = providers[0].id;
           if (providers.length > 0 && !oauthProviderId) oauthProviderId = providers[0].id;
+        }
+        if (keysRes.ok) {
+          const k = await keysRes.json();
+          apiKeys = k.keys || [];
+        }
+        if (rulesRes.ok) {
+          const r = await rulesRes.json();
+          routeRules = r.rules || [];
         }
       } else {
         // Lightweight live tick (sub-millisecond SQLite query, zero combo/provider overhead)
@@ -421,6 +491,113 @@
     }
   }
 
+
+  async function handleProbeProvider() {
+    if (!newProvUrl) return;
+    probeLoading = true;
+    probeResult = null;
+    try {
+      const res = await fetch("/api/providers/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          baseUrl: newProvUrl,
+          apiKey: newProvKey || undefined,
+          type: newProvType,
+        }),
+      });
+      probeResult = await res.json();
+    } catch (err) {
+      probeResult = { valid: false, statusCode: 0, latencyMs: 0, error: String(err) };
+    } finally {
+      probeLoading = false;
+    }
+  }
+
+  async function handleAddKey() {
+    if (!newKeyName) return;
+    let expiresAt: number | undefined = undefined;
+    const now = Date.now();
+    if (newKeyExpiry === "1d") expiresAt = now + 86400 * 1000;
+    else if (newKeyExpiry === "7d") expiresAt = now + 7 * 86400 * 1000;
+    else if (newKeyExpiry === "30d") expiresAt = now + 30 * 86400 * 1000;
+    else if (newKeyExpiry === "90d") expiresAt = now + 90 * 86400 * 1000;
+    else if (newKeyExpiry === "1y") expiresAt = now + 365 * 86400 * 1000;
+
+    let headersObj: Record<string, string> | undefined = undefined;
+    if (newKeyHeaders.trim()) {
+      try {
+        headersObj = JSON.parse(newKeyHeaders.trim());
+      } catch {
+        headersObj = {};
+        for (const line of newKeyHeaders.split("\n")) {
+          const idx = line.indexOf(":");
+          if (idx !== -1) headersObj[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+        }
+      }
+    }
+
+    const bodyKws = newKeyBodyKw.trim() ? newKeyBodyKw.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+    const modelsArr = newKeyModels.trim() ? newKeyModels.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+
+    await fetch("/api/keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({
+        name: newKeyName.trim(),
+        expiresAt,
+        maxRequests: newKeyMaxReq || undefined,
+        maxTokens: newKeyMaxTokens || undefined,
+        maxPromptTokens: newKeyMaxPrompt || undefined,
+        maxCompletionTokens: newKeyMaxComp || undefined,
+        requiredHeaders: headersObj,
+        requiredBodyKeywords: bodyKws,
+        allowedModels: modelsArr,
+        enabled: true,
+      }),
+    });
+
+    newKeyName = "";
+    newKeyMaxReq = undefined;
+    newKeyMaxTokens = undefined;
+    newKeyMaxPrompt = undefined;
+    newKeyMaxComp = undefined;
+    newKeyHeaders = "";
+    newKeyBodyKw = "";
+    newKeyModels = "";
+    await refreshData(true);
+  }
+
+  async function handleDeleteKey(id: string) {
+    if (!confirm(`Revoke API key "${id}"?`)) return;
+    await fetch(`/api/keys/${encodeURIComponent(id)}`, { method: "DELETE", headers: getAuthHeaders() });
+    await refreshData(true);
+  }
+
+  async function handleAddRule() {
+    if (!newRulePattern || !newRuleTarget) return;
+    await fetch("/api/rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({
+        pattern: newRulePattern.trim(),
+        target: newRuleTarget.trim(),
+        priority: Number(newRulePriority) || 10,
+        enabled: true,
+      }),
+    });
+    newRulePattern = "";
+    newRuleTarget = "";
+    newRulePriority = 10;
+    await refreshData(true);
+  }
+
+  async function handleDeleteRule(id: string) {
+    if (!confirm(`Delete rule "${id}"?`)) return;
+    await fetch(`/api/rules/${encodeURIComponent(id)}`, { method: "DELETE", headers: getAuthHeaders() });
+    await refreshData(true);
+  }
+
   async function handleClearLogs() {
     await fetch("/api/logs/clear", { method: "POST", headers: getAuthHeaders() });
     await refreshData();
@@ -439,9 +616,13 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: playModel,
-          messages: [{ role: "user", content: playPrompt }],
+          messages: [
+            ...(playSystem.trim() ? [{ role: "system", content: playSystem.trim() }] : []),
+            { role: "user", content: playPrompt }
+          ],
           stream: playStream,
-          max_tokens: 1000,
+          temperature: Number(playTemp),
+          max_tokens: Number(playMaxTokens),
         }),
       });
 
@@ -552,6 +733,14 @@
           {@render icon(ICONS.combos)}<span>Combos</span>
           <span class="pill-count">{combos.length}</span>
         </button>
+        <button class="nav-item" class:active={activeTab === 'keys'} onclick={() => activeTab = 'keys'}>
+          {@render icon(ICONS.keys)}<span>API Keys</span>
+          <span class="pill-count">{apiKeys.length}</span>
+        </button>
+        <button class="nav-item" class:active={activeTab === 'rules'} onclick={() => activeTab = 'rules'}>
+          {@render icon(ICONS.rules)}<span>Force Routing</span>
+          <span class="pill-count">{routeRules.length}</span>
+        </button>
         <button class="nav-item" class:active={activeTab === 'logs'} onclick={() => activeTab = 'logs'}>
           {@render icon(ICONS.logs)}<span>Logs</span>
         </button>
@@ -583,6 +772,8 @@
           {#if activeTab === 'overview'}Overview
           {:else if activeTab === 'providers'}Providers
           {:else if activeTab === 'combos'}Combos
+          {:else if activeTab === 'keys'}API Keys & Billing
+          {:else if activeTab === 'rules'}Force Routing
           {:else if activeTab === 'logs'}Logs
           {:else if activeTab === 'playground'}Playground
           {:else if activeTab === 'oauth'}Sessions
@@ -832,7 +1023,21 @@
                   <label for="p-key">API keys (comma separated)</label>
                   <input id="p-key" type="password" bind:value={newProvKey} placeholder="key-1, key-2" />
                 </div>
-                <button class="btn-brand" onclick={handleAddProvider}>Register</button>
+                <div class="action-row">
+                  <button class="btn-brand" onclick={handleAddProvider}>Register</button>
+                  <button class="btn-subtle" disabled={probeLoading || !newProvUrl} onclick={handleProbeProvider}>
+                    {probeLoading ? "Probing..." : "Probe & Test Key"}
+                  </button>
+                </div>
+                {#if probeResult}
+                  <div class="probe-box" class:probe-ok={probeResult.valid} class:probe-err={!probeResult.valid}>
+                    {#if probeResult.valid}
+                      <span class="probe-status">HTTP {probeResult.statusCode} OK · {probeResult.latencyMs}ms · {probeResult.modelCount} models</span>
+                    {:else}
+                      <span class="probe-err-msg">{probeResult.error || "Probe failed"}</span>
+                    {/if}
+                  </div>
+                {/if}
               </div>
             </div>
           </div>
@@ -904,7 +1109,151 @@
             </div>
           </div>
 
-        {:else if activeTab === 'logs'}
+{:else if activeTab === 'keys'}
+          <div class="tab-pane">
+            <div class="split-layout">
+              <div class="card-list">
+                {#each apiKeys as k (k.id)}
+                  {@const isExpired = k.expiresAt && Date.now() > k.expiresAt}
+                  {@const isExhausted = (k.maxRequests && k.usedRequests >= k.maxRequests) || (k.maxTokens && k.usedTokens >= k.maxTokens)}
+                  <div class="item-card">
+                    <div class="card-head">
+                      <div class="title-group">
+                        <span class="type-chip" class:s-err={!k.enabled || isExpired || isExhausted} class:s-ok={k.enabled && !isExpired && !isExhausted}>
+                          {isExpired ? "EXPIRED" : isExhausted ? "EXHAUSTED" : k.enabled ? "ACTIVE" : "DISABLED"}
+                        </span>
+                        <span class="item-name">{k.name}</span>
+                        <code class="item-slug">{k.key.slice(0, 12)}...{k.key.slice(-4)}</code>
+                      </div>
+                      <button class="btn-danger" onclick={() => handleDeleteKey(k.id)}>Revoke</button>
+                    </div>
+
+                    <div class="detail-row">
+                      <span class="d-label">Raw Key</span>
+                      <code class="d-val selectable">{k.key}</code>
+                    </div>
+
+                    <div class="detail-row">
+                      <span class="d-label">Requests</span>
+                      <span class="d-val">{k.usedRequests.toLocaleString()} / {k.maxRequests ? k.maxRequests.toLocaleString() : "Unlimited"}</span>
+                    </div>
+
+                    <div class="detail-row">
+                      <span class="d-label">Tokens</span>
+                      <span class="d-val">{k.usedTokens.toLocaleString()} / {k.maxTokens ? k.maxTokens.toLocaleString() : "Unlimited"} (in {k.usedPromptTokens.toLocaleString()} · out {k.usedCompletionTokens.toLocaleString()})</span>
+                    </div>
+
+                    <div class="detail-row">
+                      <span class="d-label">Expires</span>
+                      <span class="d-val">{k.expiresAt ? new Date(k.expiresAt).toLocaleDateString("en-GB") : "Never"}</span>
+                    </div>
+
+                    {#if k.allowedModels && k.allowedModels.length > 0}
+                      <div class="detail-row"><span class="d-label">Models</span><span class="d-val">{k.allowedModels.join(", ")}</span></div>
+                    {/if}
+
+                    {#if k.requiredHeaders}
+                      <div class="detail-row"><span class="d-label">Guards</span><span class="d-val">{JSON.stringify(k.requiredHeaders)}</span></div>
+                    {/if}
+                  </div>
+                {/each}
+                {#if apiKeys.length === 0}
+                  <div class="empty-cell">No consumer API keys issued yet.</div>
+                {/if}
+              </div>
+
+              <div class="drawer-box">
+                <div class="drawer-title">Issue Consumer API Key</div>
+                <div class="field">
+                  <label for="k-name">Key Name / Client ID</label>
+                  <input id="k-name" bind:value={newKeyName} placeholder="production-mobile-app" />
+                </div>
+                <div class="field">
+                  <label for="k-exp">Expiration Duration</label>
+                  <select id="k-exp" bind:value={newKeyExpiry}>
+                    <option value="never">Never expires</option>
+                    <option value="1d">1 Day</option>
+                    <option value="7d">7 Days</option>
+                    <option value="30d">30 Days</option>
+                    <option value="90d">90 Days</option>
+                    <option value="1y">1 Year</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="k-req">Max Requests (optional)</label>
+                  <input id="k-req" type="number" bind:value={newKeyMaxReq} placeholder="1000" />
+                </div>
+                <div class="field">
+                  <label for="k-tokens">Max Total Tokens (optional)</label>
+                  <input id="k-tokens" type="number" bind:value={newKeyMaxTokens} placeholder="1000000" />
+                </div>
+                <div class="field">
+                  <label for="k-in-tokens">Max Input Tokens (optional)</label>
+                  <input id="k-in-tokens" type="number" bind:value={newKeyMaxPrompt} placeholder="500000" />
+                </div>
+                <div class="field">
+                  <label for="k-out-tokens">Max Output Tokens (optional)</label>
+                  <input id="k-out-tokens" type="number" bind:value={newKeyMaxComp} placeholder="500000" />
+                </div>
+                <div class="field">
+                  <label for="k-models">Allowed Models (wildcards, comma-sep)</label>
+                  <input id="k-models" bind:value={newKeyModels} placeholder="free-*, claude-*, gemini-*" />
+                </div>
+                <div class="field">
+                  <label for="k-head">Required Headers Guard (Header: Value or JSON)</label>
+                  <textarea id="k-head" rows="2" bind:value={newKeyHeaders} placeholder="x-client-id: my-app"></textarea>
+                </div>
+                <div class="field">
+                  <label for="k-body">Required Body Signatures (comma-separated)</label>
+                  <input id="k-body" bind:value={newKeyBodyKw} placeholder="authorized_client, v2" />
+                </div>
+                <button class="btn-brand" onclick={handleAddKey}>Generate API Key</button>
+              </div>
+            </div>
+          </div>
+
+        {:else if activeTab === 'rules'}
+          <div class="tab-pane">
+            <div class="split-layout">
+              <div class="card-list">
+                {#each routeRules as r (r.id)}
+                  <div class="item-card">
+                    <div class="card-head">
+                      <div class="title-group">
+                        <span class="type-chip">p{r.priority}</span>
+                        <code class="item-slug accent">{r.pattern}</code>
+                        <span class="step-arr">➔</span>
+                        <code class="item-slug text-white">{r.target}</code>
+                      </div>
+                      <button class="btn-danger" onclick={() => handleDeleteRule(r.id)}>Delete</button>
+                    </div>
+                  </div>
+                {/each}
+                {#if routeRules.length === 0}
+                  <div class="empty-cell">No force routing rewrite rules configured yet.</div>
+                {/if}
+              </div>
+
+              <div class="drawer-box">
+                <div class="drawer-title">Create Force Routing Rule</div>
+                <div class="field">
+                  <label for="r-pat">Match Pattern (Wildcard / Regex)</label>
+                  <input id="r-pat" bind:value={newRulePattern} placeholder="claude-*-opus / *high / claude*" />
+                </div>
+                <div class="field">
+                  <label for="r-tgt">Rewrite Target (Model / Combo / Group)</label>
+                  <input id="r-tgt" bind:value={newRuleTarget} placeholder="gemini-$1-latest / deepseek-v4.1-flash / gemini*" />
+                </div>
+                <div class="field">
+                  <label for="r-prio">Priority (higher runs first)</label>
+                  <input id="r-prio" type="number" bind:value={newRulePriority} placeholder="10" />
+                </div>
+                <button class="btn-brand" onclick={handleAddRule}>Add Routing Rule</button>
+              </div>
+            </div>
+          </div>
+
+                {:else if activeTab === 'logs'}
           <div class="tab-pane">
             <div class="toolbar">
               <div class="seg" role="group" aria-label="Time range">
@@ -986,8 +1335,22 @@
                   </select>
                 </div>
                 <div class="field">
+                  <label for="pl-sys">System Instruction (SOUL.md / AGENT.md style)</label>
+                  <textarea id="pl-sys" rows="3" bind:value={playSystem} placeholder="You are a senior fullstack engineer..."></textarea>
+                </div>
+                <div class="field">
                   <label for="pl-prompt">Prompt</label>
-                  <textarea id="pl-prompt" rows="7" bind:value={playPrompt}></textarea>
+                  <textarea id="pl-prompt" rows="5" bind:value={playPrompt}></textarea>
+                </div>
+                <div class="param-grid">
+                  <div class="field">
+                    <label for="pl-temp">Temp: {playTemp}</label>
+                    <input id="pl-temp" type="range" min="0" max="2" step="0.1" bind:value={playTemp} />
+                  </div>
+                  <div class="field">
+                    <label for="pl-max">Max Tokens</label>
+                    <input id="pl-max" type="number" bind:value={playMaxTokens} />
+                  </div>
                 </div>
                 <div class="checkbox-row">
                   <input type="checkbox" id="pl-stream" bind:checked={playStream} />
@@ -1622,4 +1985,17 @@
   @media (prefers-reduced-motion: reduce) {
     .live-bar, .act-bar { animation: none; transition: none; }
   }
+
+  .probe-box {
+    padding: 7px 10px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+  }
+  .probe-ok { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #22c55e; }
+  .probe-err { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #ef4444; }
+  .param-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .selectable { user-select: all; }
+  .text-white { color: var(--text); }
+
 </style>

@@ -7,6 +7,8 @@ import { createKeepAliveStream } from "./stream";
 import { GeminiAdapter } from "../adapters/gemini";
 import { AnthropicAdapter } from "../adapters/anthropic";
 import { RequestSanitizer } from "./sanitizer";
+import { RewriteEngine } from "./rewrite";
+import { KeyManager, type ApiKeyRecord } from "./keys";
 
 export class EdgeRouter {
   constructor(private storage: StorageAdapter, private onLog?: (log: TelemetryLog) => void) {}
@@ -22,11 +24,39 @@ export class EdgeRouter {
    * Main dispatch entry for /v1/chat/completions
    */
   async dispatch(req: Request, body: ChatCompletionRequest): Promise<Response> {
-    const requestedModel = body.model;
+    // 1. API Key Auth & Quota Enforcement (if client key is supplied)
+    let matchedApiKey: ApiKeyRecord | null = null;
+    const authHeader = req.headers.get("Authorization");
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const clientKey = authHeader.slice(7).trim();
+      matchedApiKey = await this.storage.getKey(clientKey);
+      if (matchedApiKey) {
+        const keyVal = KeyManager.validate(req, body, matchedApiKey);
+        if (!keyVal.valid) {
+          return Response.json(
+            {
+              error: {
+                message: keyVal.error,
+                type: "permission_error",
+                code: keyVal.statusCode === 429 ? "quota_exceeded" : "unauthorized",
+              },
+            },
+            { status: keyVal.statusCode || 403 }
+          );
+        }
+      }
+    }
+
+    // 2. Force Routing / Rewrite Rules (e.g. "claude-*-opus" -> "gemini-*-latest")
+    const rules = await this.storage.getRules();
+    const rewriteRes = RewriteEngine.rewrite(body.model, rules);
+    const requestedModel = rewriteRes.targetModel;
+    body.model = requestedModel;
+
     const isStream = Boolean(body.stream);
     const startMs = Date.now();
 
-    // 1. Resolve targets: either from a Combo alias or direct provider route
+    // 3. Resolve targets: either from a Combo alias or direct provider route
     const targets = await this.resolveTargets(requestedModel);
 
     if (targets.length === 0) {
@@ -122,6 +152,7 @@ export class EdgeRouter {
           }
 
           const onUsageCallback = (usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }) => {
+            const tot = usage.total_tokens ?? ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
             this.logRecord({
               id: crypto.randomUUID(),
               timestamp: Date.now(),
@@ -130,10 +161,19 @@ export class EdgeRouter {
               targetModel: target.model,
               status: 200,
               latencyMs,
-              tokens: usage.total_tokens ?? ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0)),
+              tokens: tot,
               promptTokens: usage.prompt_tokens ?? 0,
               completionTokens: usage.completion_tokens ?? 0,
             });
+
+            if (matchedApiKey) {
+              this.storage.deductKeyUsage(matchedApiKey.id, {
+                requests: 1,
+                tokens: tot,
+                promptTokens: usage.prompt_tokens ?? 0,
+                completionTokens: usage.completion_tokens ?? 0,
+              });
+            }
           };
 
           // ---------------------------------------------------------------
@@ -187,8 +227,14 @@ export class EdgeRouter {
               responseJson = JSON.parse(rawText) as Record<string, unknown>;
             } catch {
               let sseTokens = 0;
-              const match = rawText.match(/"total_tokens":\s*(\d+)/);
-              if (match) sseTokens = parseInt(match[1], 10);
+              let ssePrompt = 0;
+              let sseComp = 0;
+              const matchTot = rawText.match(/"total_tokens":\s*(\d+)/);
+              const matchPrompt = rawText.match(/"prompt_tokens":\s*(\d+)/);
+              const matchComp = rawText.match(/"completion_tokens":\s*(\d+)/);
+              if (matchTot) sseTokens = parseInt(matchTot[1], 10);
+              if (matchPrompt) ssePrompt = parseInt(matchPrompt[1], 10);
+              if (matchComp) sseComp = parseInt(matchComp[1], 10);
 
               this.logRecord({
                 id: crypto.randomUUID(),
@@ -199,7 +245,18 @@ export class EdgeRouter {
                 status: upstreamRes.status,
                 latencyMs,
                 tokens: sseTokens,
+                promptTokens: ssePrompt,
+                completionTokens: sseComp,
               });
+
+              if (matchedApiKey) {
+                this.storage.deductKeyUsage(matchedApiKey.id, {
+                  requests: 1,
+                  tokens: sseTokens,
+                  promptTokens: ssePrompt,
+                  completionTokens: sseComp,
+                });
+              }
 
               return new Response(rawText, {
                 status: upstreamRes.status,
@@ -212,6 +269,7 @@ export class EdgeRouter {
           }
 
           const usage = responseJson?.usage as { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
+          const tot = usage?.total_tokens ?? ((usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0));
 
           // Record telemetry asynchronously
           this.logRecord({
@@ -222,10 +280,19 @@ export class EdgeRouter {
             targetModel: target.model,
             status: 200,
             latencyMs,
-            tokens: usage?.total_tokens ?? ((usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0)),
+            tokens: tot,
             promptTokens: usage?.prompt_tokens ?? 0,
             completionTokens: usage?.completion_tokens ?? 0,
           });
+
+          if (matchedApiKey) {
+            this.storage.deductKeyUsage(matchedApiKey.id, {
+              requests: 1,
+              tokens: tot,
+              promptTokens: usage?.prompt_tokens ?? 0,
+              completionTokens: usage?.completion_tokens ?? 0,
+            });
+          }
 
           return Response.json(responseJson, {
             status: 200,
