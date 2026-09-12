@@ -164,9 +164,23 @@
   let newProvType = $state<"openai" | "gemini" | "anthropic">("openai");
 
   let provDrawerMode = $state<"single" | "bulk">("single");
-  let bulkInput = $state("");
+  let bulkSubMode = $state<"pool" | "multi">("pool");
+  let bulkTargetProvId = $state("new");
+  let bulkProvName = $state("");
+  let bulkProvId = $state("");
+  let bulkProvType = $state<"openai" | "gemini" | "anthropic">("openai");
+  let bulkProvUrl = $state("");
+  let bulkKeysInput = $state("");
+  let bulkMultiInput = $state("");
   let bulkLoading = $state(false);
   let bulkResultMsg = $state("");
+
+  const detectedPoolKeyCount = $derived(
+    bulkKeysInput
+      .split(/[\n,;\t]+/)
+      .map((line) => line.replace(/(\/\/|#).*$/, "").trim())
+      .filter(Boolean).length
+  );
 
   let oauthProviderId = $state("");
   let oauthJson = $state("");
@@ -520,28 +534,79 @@
   }
 
   async function handleBulkIngest() {
-    if (!bulkInput.trim()) return;
     bulkLoading = true;
     bulkResultMsg = "";
     try {
-      let payload: any = bulkInput.trim();
-      if (payload.startsWith("{") || payload.startsWith("[")) {
-        try {
-          payload = JSON.parse(payload);
-        } catch {}
+      let bodyData: any;
+      if (bulkSubMode === "pool") {
+        if (!bulkKeysInput.trim()) {
+          bulkResultMsg = "❌ Error: Please enter at least 1 API key";
+          bulkLoading = false;
+          return;
+        }
+        if (bulkTargetProvId === "new") {
+          if (!bulkProvName.trim() || !bulkProvUrl.trim()) {
+            bulkResultMsg = "❌ Error: Provider Name and Base URL are required";
+            bulkLoading = false;
+            return;
+          }
+          bodyData = {
+            mode: "pool",
+            name: bulkProvName.trim(),
+            id: bulkProvId.trim() || undefined,
+            type: bulkProvType,
+            baseUrl: bulkProvUrl.trim(),
+            keys: bulkKeysInput.trim(),
+          };
+        } else {
+          bodyData = {
+            mode: "pool",
+            targetProviderId: bulkTargetProvId,
+            keys: bulkKeysInput.trim(),
+          };
+        }
+      } else {
+        if (!bulkMultiInput.trim()) {
+          bulkResultMsg = "❌ Error: Payload cannot be empty";
+          bulkLoading = false;
+          return;
+        }
+        bodyData = bulkMultiInput.trim();
+        if (bodyData.startsWith("{") || bodyData.startsWith("[")) {
+          try {
+            bodyData = JSON.parse(bodyData);
+          } catch {}
+        }
       }
+
       const res = await fetch("/api/providers/bulk", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: typeof payload === "string" ? payload : JSON.stringify(payload),
+        headers: {
+          "Content-Type": typeof bodyData === "string" ? "text/plain" : "application/json",
+          ...getAuthHeaders(),
+        },
+        body: typeof bodyData === "string" ? bodyData : JSON.stringify(bodyData),
       });
-      const data = await res.json();
-      if (data.success) {
-        bulkResultMsg = `✅ Ingested ${data.total} credentials (${data.durationMs}ms)`;
-        bulkInput = "";
+
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Server returned status ${res.status}: ${text.slice(0, 100)}`);
+      }
+
+      if (res.ok && data.success) {
+        if (data.mode === "pool") {
+          bulkResultMsg = `✅ Pooled ${data.addedKeys} keys into "${data.provider?.name || 'provider'}" (Total in pool: ${data.totalKeysInPool}) [${data.durationMs}ms]`;
+          bulkKeysInput = "";
+        } else {
+          bulkResultMsg = `✅ Ingested ${data.total} credentials (${data.saved} saved) [${data.durationMs}ms]`;
+          bulkMultiInput = "";
+        }
         await reloadStatus();
       } else {
-        bulkResultMsg = `❌ Error: ${data.error || "Failed"}`;
+        bulkResultMsg = `❌ Error: ${data.error || text || "Failed"}`;
       }
     } catch (err: any) {
       bulkResultMsg = `❌ Error: ${err.message}`;
@@ -1083,26 +1148,99 @@
                     </div>
                   {/if}
                 {:else}
-                  <div class="bulk-help-banner">
-                    Paste raw text (1 key per line), JSON array, Cookie string (<code>Cookie: ...</code>), or OAuth Session JSON (Cursor/Kiro).
-                  </div>
-                  <div class="field">
-                    <label for="bulk-inp">Raw Payload / Keys</label>
-                    <textarea
-                      id="bulk-inp"
-                      class="bulk-textarea"
-                      bind:value={bulkInput}
-                      placeholder={`nvapi-abcdef1234567890...\nsk-ant-api03-abcdef...\nCookie: session_token=xyz123...\n{"access_token":"...","refreshToken":"..."}`}
-                      rows="7"
-                    ></textarea>
-                  </div>
-                  <div class="action-row">
-                    <button class="btn-brand" disabled={bulkLoading || !bulkInput.trim()} onclick={handleBulkIngest}>
-                      {bulkLoading ? "Ingesting..." : "⚡ Ingest Batch"}
+                  <div class="sub-mode-selector">
+                    <button class="sub-mode-btn" class:active={bulkSubMode === 'pool'} onclick={() => bulkSubMode = 'pool'}>
+                      Pool Keys into Provider
+                    </button>
+                    <button class="sub-mode-btn" class:active={bulkSubMode === 'multi'} onclick={() => bulkSubMode = 'multi'}>
+                      Multi / Auto-detect
                     </button>
                   </div>
+
+                  {#if bulkSubMode === 'pool'}
+                    <div class="field">
+                      <label for="b-target">Target Provider</label>
+                      <select id="b-target" bind:value={bulkTargetProvId}>
+                        <option value="new">+ Create New Provider...</option>
+                        {#each providers as p}
+                          <option value={p.id}>Append to: {p.name} ({p.id})</option>
+                        {/each}
+                      </select>
+                    </div>
+
+                    {#if bulkTargetProvId === 'new'}
+                      <div class="field">
+                        <label for="b-name">Provider Name</label>
+                        <input id="b-name" bind:value={bulkProvName} placeholder="Groq Cloud Pool" />
+                      </div>
+                      <div class="field">
+                        <label for="b-id">ID (Optional)</label>
+                        <input id="b-id" bind:value={bulkProvId} placeholder="groq-cloud (auto from name)" />
+                      </div>
+                      <div class="field">
+                        <label for="b-type">Protocol</label>
+                        <select id="b-type" bind:value={bulkProvType}>
+                          <option value="openai">OpenAI compatible</option>
+                          <option value="gemini">Google Gemini</option>
+                          <option value="anthropic">Anthropic Messages</option>
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label for="b-url">Base URL</label>
+                        <input id="b-url" bind:value={bulkProvUrl} placeholder="https://api.groq.com/openai/v1" />
+                      </div>
+                    {:else}
+                      {@const selectedTarget = providers.find(p => p.id === bulkTargetProvId)}
+                      {#if selectedTarget}
+                        <div class="target-info-card">
+                          <div><strong>Base URL:</strong> <code>{selectedTarget.baseUrl}</code></div>
+                          <div><strong>Protocol:</strong> <span class="type-chip">{selectedTarget.type}</span> · <strong>Existing Keys:</strong> {selectedTarget.apiKey ? selectedTarget.apiKey.split(/[\n,]/).filter(Boolean).length : 0} in pool</div>
+                        </div>
+                      {/if}
+                    {/if}
+
+                    <div class="field">
+                      <div class="label-row">
+                        <label for="b-keys">API Keys (1 per line or comma-separated)</label>
+                        <span class="keys-detected-tag">{detectedPoolKeyCount} keys detected</span>
+                      </div>
+                      <textarea
+                        id="b-keys"
+                        class="bulk-textarea"
+                        bind:value={bulkKeysInput}
+                        placeholder={`sk-key-1\nsk-key-2\nsk-key-3...`}
+                        rows="6"
+                      ></textarea>
+                    </div>
+
+                    <div class="action-row">
+                      <button class="btn-brand" disabled={bulkLoading || detectedPoolKeyCount === 0} onclick={handleBulkIngest}>
+                        {bulkLoading ? "Ingesting..." : `⚡ Ingest ${detectedPoolKeyCount} Keys into Pool`}
+                      </button>
+                    </div>
+                  {:else}
+                    <div class="bulk-help-banner">
+                      Auto-detects Nvidia (<code>nvapi-</code>), Anthropic (<code>sk-ant-</code>), Gemini (<code>AIzaSy</code>), Groq (<code>gsk_</code>), OpenRouter (<code>sk-or-</code>), Cookie headers, or OAuth Session JSON.
+                    </div>
+                    <div class="field">
+                      <label for="bulk-inp">Raw Payload / Multiple Credentials</label>
+                      <textarea
+                        id="bulk-inp"
+                        class="bulk-textarea"
+                        bind:value={bulkMultiInput}
+                        placeholder={`nvapi-abcdef1234567890...\nsk-ant-api03-abcdef...\nCookie: session_token=xyz123...\n{"access_token":"...","refreshToken":"..."}`}
+                        rows="7"
+                      ></textarea>
+                    </div>
+                    <div class="action-row">
+                      <button class="btn-brand" disabled={bulkLoading || !bulkMultiInput.trim()} onclick={handleBulkIngest}>
+                        {bulkLoading ? "Ingesting..." : "⚡ Ingest Multi Batch"}
+                      </button>
+                    </div>
+                  {/if}
+
                   {#if bulkResultMsg}
-                    <div class="bulk-result-badge">{bulkResultMsg}</div>
+                    <div class="bulk-result-badge" class:badge-err={bulkResultMsg.startsWith('❌')}>{bulkResultMsg}</div>
                   {/if}
                 {/if}
               </div>
@@ -1918,6 +2056,55 @@
     background: rgba(255, 255, 255, 0.08);
     color: var(--text);
   }
+  .sub-mode-selector {
+    display: flex;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .sub-mode-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    padding: 5px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    text-align: center;
+  }
+  .sub-mode-btn.active {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+  }
+  .target-info-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .keys-detected-tag {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+  }
   .bulk-help-banner {
     background: rgba(255, 255, 255, 0.02);
     border: 1px dashed var(--border-subtle);
@@ -1948,6 +2135,11 @@
     font-size: 10.5px;
     color: #4ade80;
     font-variant-numeric: tabular-nums;
+  }
+  .badge-err {
+    background: rgba(239, 68, 68, 0.08) !important;
+    border-color: rgba(239, 68, 68, 0.25) !important;
+    color: #ef4444 !important;
   }
 
   .field { display: flex; flex-direction: column; gap: 4px; }

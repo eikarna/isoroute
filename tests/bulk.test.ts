@@ -77,6 +77,19 @@ describe("Bulk Ingestion Engine", () => {
     expect(keys[0].key.startsWith("er-live-")).toBe(true);
   });
 
+  it("pools and deduplicates keys into a provider key pool", () => {
+    const rawKeys = `
+      sk-ant-key1
+      sk-ant-key2
+      sk-ant-key3
+      sk-ant-key1 // duplicate
+    `;
+    const pool = BulkIngestEngine.poolKeys(rawKeys, "sk-ant-key0,sk-ant-key1");
+    expect(pool.totalCount).toBe(4); // key0, key1, key2, key3
+    expect(pool.addedCount).toBe(2); // key2, key3 were new
+    expect(pool.combinedApiKey).toBe("sk-ant-key0,sk-ant-key1,sk-ant-key2,sk-ant-key3");
+  });
+
   it("handles 20,000 model entries batch insert in SQLite efficiently (<500ms)", async () => {
     const storage = new SqliteStorageAdapter(":memory:");
 

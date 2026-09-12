@@ -11,6 +11,21 @@ export interface BulkParseOptions {
   namePrefix?: string;
 }
 
+export interface BulkPoolPayload {
+  mode?: "pool" | "multi";
+  targetProviderId?: string;
+  id?: string;
+  name?: string;
+  baseUrl?: string;
+  type?: "openai" | "gemini" | "anthropic" | "custom";
+  keys?: string | string[];
+  headers?: Record<string, string>;
+  defaultBaseUrl?: string;
+  defaultProviderType?: "openai" | "gemini" | "anthropic" | "custom";
+  namePrefix?: string;
+  providerPrefix?: string;
+}
+
 export interface ParsedCredential {
   id: string;
   name: string;
@@ -27,6 +42,52 @@ export interface BulkIngestSummary {
 }
 
 export class BulkIngestEngine {
+  /**
+   * Extract and clean list of API keys from arbitrary text (newline, comma, semicolon)
+   */
+  static extractKeyList(raw: string | string[]): string[] {
+    if (Array.isArray(raw)) {
+      return raw.map((k) => String(k).trim()).filter(Boolean);
+    }
+    if (typeof raw !== "string") return [];
+    return raw
+      .split(/[\r\n,;\t]+/)
+      .map((line) => line.replace(/(\/\/|#).*$/, "").trim())
+      .filter(Boolean);
+  }
+
+  /**
+   * Pool multiple API keys into a single comma-separated string, merging and deduplicating
+   */
+  static poolKeys(
+    newKeysRaw: string | string[],
+    existingApiKey?: string
+  ): { keys: string[]; combinedApiKey: string; addedCount: number; totalCount: number } {
+    const existingKeys = existingApiKey
+      ? existingApiKey.split(/[\r\n,;\t]+/).map((k) => k.trim()).filter(Boolean)
+      : [];
+    const newKeys = this.extractKeyList(newKeysRaw);
+
+    const keySet = new Set<string>();
+    for (const k of existingKeys) keySet.add(k);
+
+    let addedCount = 0;
+    for (const k of newKeys) {
+      if (!keySet.has(k)) {
+        keySet.add(k);
+        addedCount++;
+      }
+    }
+
+    const allKeys = Array.from(keySet);
+    return {
+      keys: allKeys,
+      combinedApiKey: allKeys.join(","),
+      addedCount,
+      totalCount: allKeys.length,
+    };
+  }
+
   /**
    * Compute deterministic 16-char hex hash from string
    */

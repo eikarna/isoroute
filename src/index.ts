@@ -276,15 +276,85 @@ export async function handleRequest(request: Request): Promise<Response> {
     }, { headers: { "Access-Control-Allow-Origin": "*" } });
   }
 
-  // Bulk Ingest Providers (API keys, OAuth, Cookie sessions)
+  // Bulk Ingest Providers (API keys, OAuth, Cookie sessions, or Key Pooling)
   if (path === "/api/providers/bulk" && request.method === "POST") {
     if (!(await AdminAuth.verify(request))) {
       return Response.json({ error: "Unauthorized: Admin auth required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
     }
     const start = Date.now();
     const contentType = request.headers.get("content-type") || "";
-    const rawData = contentType.includes("application/json") ? await request.json() : await request.text();
-    const providers = BulkIngestEngine.parseCredentials(rawData);
+    let rawData: any;
+    try {
+      rawData = contentType.includes("application/json") ? await request.json() : await request.text();
+    } catch {
+      try {
+        rawData = await request.text();
+      } catch {
+        rawData = "";
+      }
+    }
+
+    // Case 1: Pool keys into a single target provider (existing or new)
+    if (rawData && typeof rawData === "object" && !Array.isArray(rawData) && (rawData.mode === "pool" || rawData.targetProviderId || (rawData.name && rawData.baseUrl && rawData.keys))) {
+      const targetId = rawData.targetProviderId || rawData.id;
+      let existingProvider: Provider | null = null;
+      if (targetId) {
+        existingProvider = await storage.getProvider(targetId);
+      }
+
+      const keysInput = rawData.keys || "";
+      const poolRes = BulkIngestEngine.poolKeys(keysInput, existingProvider?.apiKey);
+
+      if (existingProvider) {
+        existingProvider.apiKey = poolRes.combinedApiKey;
+        if (rawData.name) existingProvider.name = rawData.name;
+        if (rawData.baseUrl) existingProvider.baseUrl = rawData.baseUrl;
+        if (rawData.type) existingProvider.type = rawData.type;
+        if (rawData.headers) existingProvider.headers = { ...existingProvider.headers, ...rawData.headers };
+        await storage.saveProvider(existingProvider);
+        return Response.json({
+          success: true,
+          mode: "pool",
+          action: "updated",
+          provider: { id: existingProvider.id, name: existingProvider.name, type: existingProvider.type, baseUrl: existingProvider.baseUrl },
+          addedKeys: poolRes.addedCount,
+          totalKeysInPool: poolRes.totalCount,
+          durationMs: Date.now() - start,
+        }, { headers: { "Access-Control-Allow-Origin": "*" } });
+      } else {
+        const id = rawData.id || rawData.name?.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `prov-${Date.now().toString(36)}`;
+        const newProv: Provider = {
+          id,
+          name: rawData.name || id,
+          baseUrl: rawData.baseUrl || "https://api.openai.com/v1",
+          apiKey: poolRes.combinedApiKey,
+          type: rawData.type || "openai",
+          headers: rawData.headers,
+          enabled: true,
+        };
+        await storage.saveProvider(newProv);
+        return Response.json({
+          success: true,
+          mode: "pool",
+          action: "created",
+          provider: { id: newProv.id, name: newProv.name, type: newProv.type, baseUrl: newProv.baseUrl },
+          addedKeys: poolRes.addedCount,
+          totalKeysInPool: poolRes.totalCount,
+          durationMs: Date.now() - start,
+        }, { headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+    }
+
+    // Case 2: Multi-credential parsing / Auto-detection
+    const options: BulkParseOptions = typeof rawData === "object" && !Array.isArray(rawData) ? {
+      defaultBaseUrl: rawData.defaultBaseUrl,
+      defaultProviderType: rawData.defaultProviderType,
+      namePrefix: rawData.namePrefix,
+      providerPrefix: rawData.providerPrefix,
+    } : {};
+
+    const payloadToParse = typeof rawData === "object" && !Array.isArray(rawData) && rawData.keys ? rawData.keys : rawData;
+    const providers = BulkIngestEngine.parseCredentials(payloadToParse, options);
     let count = 0;
     if (storage.saveProvidersBatch) {
       count = await storage.saveProvidersBatch(providers);
@@ -294,6 +364,7 @@ export async function handleRequest(request: Request): Promise<Response> {
     }
     return Response.json({
       success: true,
+      mode: "multi",
       total: providers.length,
       saved: count,
       durationMs: Date.now() - start,
