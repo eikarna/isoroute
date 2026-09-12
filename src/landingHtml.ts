@@ -101,7 +101,7 @@ export const PUBLIC_LANDING_HTML = `<!DOCTYPE html>
     /* Telemetry Grid */
     .telemetry-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       border: 1px solid var(--border);
       background: var(--border);
       gap: 1px;
@@ -227,48 +227,9 @@ export const PUBLIC_LANDING_HTML = `<!DOCTYPE html>
       white-space: pre;
     }
 
-    /* Routes List: Stacked on Mobile, Table on Desktop */
-    .routes-list {
-      display: flex;
-      flex-direction: column;
-      width: 100%;
-    }
-    .route-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      padding: 9px 12px;
-      border-bottom: 1px solid var(--border-subtle);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .route-row:last-child { border-bottom: none; }
-    .r-slug { color: var(--accent); font-weight: 500; min-width: 80px; }
-    .r-chain { color: var(--text-dim); font-size: 10.5px; flex: 1; word-break: break-all; }
-    .r-badge { color: #22c55e; font-size: 9.5px; }
-
-    footer {
-      border-top: 1px solid var(--border-subtle);
-      padding-top: 14px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-family: var(--font-mono);
-      font-size: 10px;
-      color: var(--text-dim);
-      flex-wrap: wrap;
-      gap: 8px;
-      width: 100%;
-    }
-    footer a { color: var(--text-muted); text-decoration: none; }
-    footer a:hover { color: var(--accent); }
-
     @media (max-width: 600px) {
       .wrap { padding: 14px 12px 40px; gap: 16px; }
-      .telemetry-grid { grid-template-columns: 1fr 1fr; }
-      .route-row { flex-direction: column; gap: 4px; }
+      .telemetry-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -278,7 +239,7 @@ export const PUBLIC_LANDING_HTML = `<!DOCTYPE html>
   <!-- Nav -->
   <header class="nav">
     <div class="nav-brand">
-      <span>edgerouter</span>
+      <span>isoroute</span>
       <span style="color:var(--text-dim)">/</span>
       <span style="color:var(--text-dim)">core</span>
     </div>
@@ -300,10 +261,6 @@ export const PUBLIC_LANDING_HTML = `<!DOCTYPE html>
     <div class="tele-cell">
       <span class="tele-label">TOKENS</span>
       <span class="tele-val" id="t-tok">—</span>
-    </div>
-    <div class="tele-cell">
-      <span class="tele-label">COMBOS</span>
-      <span class="tele-val" id="t-com">—</span>
     </div>
     <div class="tele-cell">
       <span class="tele-label">ENGINE</span>
@@ -338,22 +295,6 @@ export const PUBLIC_LANDING_HTML = `<!DOCTYPE html>
   }'</pre>
     </div>
   </div>
-
-  <!-- Active Combos List -->
-  <div class="section-box">
-    <div class="box-header">
-      <span>CONFIGURED VIRTUAL ROUTES</span>
-      <span id="routes-count">—</span>
-    </div>
-    <div class="routes-list" id="routes-container">
-      <div style="color:var(--text-dim);text-align:center;padding:12px;font-family:var(--font-mono);font-size:11px">Loading routes...</div>
-    </div>
-  </div>
-
-  <footer>
-    <div>edgerouter v0.2.0 • 20129</div>
-    <div><a href="/admin/dashboard">/admin/dashboard</a> [pass: 123456]</div>
-  </footer>
 </div>
 
 <script>
@@ -361,8 +302,8 @@ export const PUBLIC_LANDING_HTML = `<!DOCTYPE html>
   document.getElementById("base-url-code").textContent = host + "/v1";
 
   const snippets = {
-    curl: \`curl \${host}/v1/chat/completions \\\\
-  -H "Content-Type: application/json" \\\\
+    curl: \`curl \\\${host}/v1/chat/completions \\\\\\\\
+  -H "Content-Type: application/json" \\\\\\\\
   -d '{
     "model": "free-fast",
     "messages": [{"role": "user", "content": "Hello"}],
@@ -370,7 +311,7 @@ export const PUBLIC_LANDING_HTML = `<!DOCTYPE html>
   }'\`,
     python: \`from openai import OpenAI
 
-client = OpenAI(base_url="\${host}/v1", api_key="any")
+client = OpenAI(base_url="\\\${host}/v1", api_key="any")
 response = client.chat.completions.create(
     model="free-fast",
     messages=[{"role": "user", "content": "Hello"}],
@@ -380,7 +321,7 @@ for chunk in response:
     print(chunk.choices[0].delta.content or "", end="", flush=True)\`,
     ts: \`import OpenAI from "openai";
 
-const client = new OpenAI({ baseURL: "\${host}/v1", apiKey: "any" });
+const client = new OpenAI({ baseURL: "\\\${host}/v1", apiKey: *** });
 const stream = await client.chat.completions.create({
   model: "free-fast",
   messages: [{ role: "user", content: "Hello" }],
@@ -403,32 +344,11 @@ for await (const chunk of stream) {
 
   async function loadData() {
     try {
-      const [sRes, cRes] = await Promise.all([fetch("/api/status"), fetch("/api/combos")]);
+      const sRes = await fetch("/api/status");
       if (sRes.ok) {
         const s = await sRes.json();
         document.getElementById("t-req").textContent = (s.metrics?.totalRequests ?? 0).toLocaleString();
         document.getElementById("t-tok").textContent = (s.metrics?.totalTokens ?? 0).toLocaleString();
-      }
-      if (cRes.ok) {
-        const c = await cRes.json();
-        const combos = c.combos || [];
-        document.getElementById("t-com").textContent = combos.length.toString();
-        document.getElementById("routes-count").textContent = combos.length + " ACTIVE";
-
-        const container = document.getElementById("routes-container");
-        if (combos.length === 0) {
-          container.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:12px;font-family:var(--font-mono);font-size:11px">No routes configured.</div>';
-        } else {
-          container.innerHTML = combos.map(combo => \`
-            <div class="route-row">
-              <div style="display:flex;align-items:baseline;gap:8px">
-                <span class="r-slug">\${combo.id}</span>
-                <span class="r-badge">READY</span>
-              </div>
-              <div class="r-chain">\${combo.targets.map((t, i) => \`[\${i+1}] \${t.providerId}/\${t.model}\`).join(" ➔ ")}</div>
-            </div>
-          \`).join("");
-        }
       }
     } catch {}
   }
