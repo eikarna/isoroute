@@ -1,0 +1,357 @@
+// Vercel Edge Functions Native Entrypoint
+import { EdgeRouter } from "../src/core/router";
+import { MemoryStorageAdapter, type StorageAdapter } from "../src/storage";
+import { ModelDiscovery } from "../src/core/discovery";
+import { OAuthManager } from "../src/core/oauth";
+import { AdminAuth } from "../src/core/auth";
+import { ProviderProbe } from "../src/core/probe";
+import { KeyManager, type ApiKeyRecord } from "../src/core/keys";
+import type { RouteRule } from "../src/core/rewrite";
+import type { ChatCompletionRequest, ModelCombo, Provider } from "../src/types";
+import { DASHBOARD_HTML } from "../src/dashboardHtml";
+import { PUBLIC_LANDING_HTML } from "../src/landingHtml";
+
+export const config = {
+  runtime: "edge",
+};
+
+const seedProviders: Provider[] = [
+  {
+    id: "gemini-studio",
+    name: "Google AI Studio",
+    baseUrl: "https://generativelanguage.googleapis.com",
+    type: "gemini",
+    enabled: true,
+  },
+  {
+    id: "anthropic-official",
+    name: "Anthropic Claude",
+    baseUrl: "https://api.anthropic.com",
+    type: "anthropic",
+    enabled: true,
+  },
+];
+
+const seedCombos: ModelCombo[] = [
+  {
+    id: "fast-tier",
+    displayName: "Fast Tier (Gemini Flash)",
+    description: "Ultra low latency 1M context",
+    enabled: true,
+    targets: [{ providerId: "gemini-studio", model: "gemini-1.5-flash", priority: 10 }],
+  },
+  {
+    id: "smart-tier",
+    displayName: "Smart Tier (Claude Sonnet)",
+    description: "Deep reasoning & coding flagship",
+    enabled: true,
+    targets: [{ providerId: "anthropic-official", model: "claude-3-5-sonnet-20241022", priority: 10 }],
+  },
+];
+
+let cachedStorage: StorageAdapter | null = null;
+let cachedRouter: EdgeRouter | null = null;
+let initialized = false;
+
+async function getRouter(): Promise<{ router: EdgeRouter; storage: StorageAdapter }> {
+  if (cachedRouter && cachedStorage) {
+    return { router: cachedRouter, storage: cachedStorage };
+  }
+
+  const storage: StorageAdapter = new MemoryStorageAdapter();
+
+  if (!initialized) {
+    const existing = await storage.getCombos();
+    if (existing.length === 0) {
+      for (const p of seedProviders) await storage.saveProvider(p);
+      for (const c of seedCombos) await storage.saveCombo(c);
+    }
+    initialized = true;
+  }
+
+  const router = new EdgeRouter(storage);
+  cachedStorage = storage;
+  cachedRouter = router;
+
+  return { router, storage };
+}
+
+export default async function handler(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  // CORS Preflight
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
+  }
+
+  // 1. Admin Authentication API
+  if (path === "/api/auth/login" && request.method === "POST") {
+    try {
+      const { password } = (await request.json()) as { password?: string };
+      const expectedPassword = process.env.ADMIN_PASSWORD || "123456";
+
+      if (password === expectedPassword) {
+        const token = await AdminAuth.generateToken();
+        return Response.json(
+          { success: true, token },
+          {
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Set-Cookie": `admin_token=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`,
+            },
+          }
+        );
+      }
+      return Response.json({ error: "Invalid password" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    } catch {
+      return Response.json({ error: "Malformed request" }, { status: 400, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+  }
+
+  // 2. Chat Completions Proxy
+  if (path === "/v1/chat/completions" && request.method === "POST") {
+    try {
+      const body = (await request.json()) as ChatCompletionRequest;
+      const { router } = await getRouter();
+      return await router.dispatch(request, body);
+    } catch (err) {
+      return Response.json({ error: err instanceof Error ? err.message : "Internal Server Error" }, { status: 500 });
+    }
+  }
+
+  const { storage } = await getRouter();
+
+  // 3. Management REST APIs
+  if (path === "/api/status" && request.method === "GET") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const timeframe = url.searchParams.get("timeframe") || "1d";
+    const sinceParam = url.searchParams.get("since");
+    const untilParam = url.searchParams.get("until");
+    const sortBy = (url.searchParams.get("sortBy") as "timestamp" | "latency" | "tokens" | "prompt_tokens" | "completion_tokens") || "timestamp";
+    const order = (url.searchParams.get("order") as "asc" | "desc") || "desc";
+    const limit = parseInt(url.searchParams.get("limit") || "100", 10);
+
+    let since = sinceParam ? parseInt(sinceParam, 10) : undefined;
+    let until = untilParam ? parseInt(untilParam, 10) : undefined;
+
+    if (!since && timeframe) {
+      const now = Date.now();
+      if (timeframe === "1d") since = now - 86400 * 1000;
+      else if (timeframe === "7d") since = now - 7 * 86400 * 1000;
+      else if (timeframe === "30d") since = now - 30 * 86400 * 1000;
+      else if (timeframe === "1y") since = now - 365 * 86400 * 1000;
+    }
+
+    const [combos, providers, logs, metrics] = await Promise.all([
+      storage.getCombos(),
+      storage.getProviders(),
+      storage.getLogs({ since, until, sortBy, order, limit }),
+      storage.getMetrics({ since, until }),
+    ]);
+
+    return Response.json({ combos, providers, logs, metrics }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/combos" && request.method === "GET") {
+    const combos = await storage.getCombos();
+    return Response.json({ combos }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/combos" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const combo = (await request.json()) as ModelCombo;
+    await storage.saveCombo(combo);
+    return Response.json({ success: true, combo }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path.startsWith("/api/combos/") && request.method === "DELETE") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const id = decodeURIComponent(path.slice("/api/combos/".length));
+    await storage.deleteCombo(id);
+    return Response.json({ success: true, deleted: id }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/providers" && request.method === "GET") {
+    const providers = await storage.getProviders();
+    return Response.json({ providers }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/providers" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const provider = (await request.json()) as Provider;
+    await storage.saveProvider(provider);
+    return Response.json({ success: true, provider }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/providers/probe" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    try {
+      const body = (await request.json()) as { baseUrl: string; apiKey?: string; type?: "openai" | "gemini" | "anthropic" };
+      const result = await ProviderProbe.probe(body);
+      return Response.json(result, { headers: { "Access-Control-Allow-Origin": "*" } });
+    } catch (err) {
+      return Response.json({ valid: false, statusCode: 0, latencyMs: 0, error: String(err) }, { status: 500, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+  }
+
+  if (path.startsWith("/api/providers/") && path.endsWith("/models") && request.method === "GET") {
+    const id = decodeURIComponent(path.slice("/api/providers/".length, -"/models".length));
+    const provider = await storage.getProvider(id);
+    if (!provider) {
+      return Response.json({ error: "Provider not found" }, { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    try {
+      const models = await ModelDiscovery.fetchModels(provider);
+      return Response.json({ models }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to fetch upstream models" },
+        { status: 502, headers: { "Access-Control-Allow-Origin": "*" } }
+      );
+    }
+  }
+
+  if (path.startsWith("/api/providers/") && request.method === "DELETE") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const id = decodeURIComponent(path.slice("/api/providers/".length));
+    await storage.deleteProvider(id);
+    return Response.json({ success: true, deleted: id }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/keys" && request.method === "GET") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const keys = await storage.getKeys();
+    return Response.json({ keys }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/keys" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const params = (await request.json()) as Partial<ApiKeyRecord>;
+    const record = KeyManager.createKey({
+      name: params.name || "Default Key",
+      expiresAt: params.expiresAt,
+      maxRequests: params.maxRequests,
+      maxTokens: params.maxTokens,
+      maxPromptTokens: params.maxPromptTokens,
+      maxCompletionTokens: params.maxCompletionTokens,
+      requiredHeaders: params.requiredHeaders,
+      requiredBodyKeywords: params.requiredBodyKeywords,
+      allowedModels: params.allowedModels,
+      enabled: params.enabled ?? true,
+    });
+    await storage.saveKey(record);
+    return Response.json({ success: true, key: record }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path.startsWith("/api/keys/") && request.method === "DELETE") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const id = decodeURIComponent(path.slice("/api/keys/".length));
+    await storage.deleteKey(id);
+    return Response.json({ success: true, deleted: id }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/rules" && request.method === "GET") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const rules = await storage.getRules();
+    return Response.json({ rules }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/rules" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const rule = (await request.json()) as RouteRule;
+    if (!rule.id) rule.id = `rule_${Date.now()}`;
+    rule.enabled = rule.enabled ?? true;
+    await storage.saveRule(rule);
+    return Response.json({ success: true, rule }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path.startsWith("/api/rules/") && request.method === "DELETE") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const id = decodeURIComponent(path.slice("/api/rules/".length));
+    await storage.deleteRule(id);
+    return Response.json({ success: true, deleted: id }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/oauth/import" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    try {
+      const { providerId, sessionJson } = (await request.json()) as { providerId: string; sessionJson: string };
+      const parsedOAuth = OAuthManager.parseSessionJson(sessionJson);
+      const existing = await storage.getProvider(providerId);
+
+      if (!existing) {
+        return Response.json({ error: "Provider not found" }, { status: 404 });
+      }
+
+      existing.oauth = {
+        ...existing.oauth,
+        ...parsedOAuth,
+        type: parsedOAuth.type || "session_json",
+      };
+
+      await storage.saveProvider(existing);
+      return Response.json({ success: true, message: `OAuth session imported for ${providerId}` });
+    } catch (err) {
+      return Response.json({ error: err instanceof Error ? err.message : "Import failed" }, { status: 400 });
+    }
+  }
+
+  if (path === "/api/logs/clear" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    await storage.clearLogs();
+    return Response.json({ success: true }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  // 4. Public Landing Page at root (/)
+  if (path === "/" || path === "/index.html") {
+    return new Response(PUBLIC_LANDING_HTML, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  // 5. Admin Management Console (/admin or /admin/*)
+  if (path === "/admin" || path.startsWith("/admin/") || path === "/dashboard") {
+    return new Response(DASHBOARD_HTML, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  return new Response("Not Found", { status: 404 });
+}

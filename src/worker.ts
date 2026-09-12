@@ -5,8 +5,11 @@ import { MemoryStorageAdapter, type StorageAdapter } from "./storage";
 import { ModelDiscovery } from "./core/discovery";
 import { OAuthManager } from "./core/oauth";
 import { AdminAuth } from "./core/auth";
+import { ProviderProbe } from "./core/probe";
+import { KeyManager, type ApiKeyRecord } from "./core/keys";
+import type { RouteRule } from "./core/rewrite";
 import type { ChatCompletionRequest, ModelCombo, Provider } from "./types";
-import DASHBOARD_HTML from "../dist/index.html" with { type: "text" };
+import { DASHBOARD_HTML } from "./dashboardHtml";
 import { PUBLIC_LANDING_HTML } from "./landingHtml";
 
 export interface Env {
@@ -283,6 +286,85 @@ export default {
       } catch (err) {
         return Response.json({ error: err instanceof Error ? err.message : "Import failed" }, { status: 400 });
       }
+    }
+
+    if (path === "/api/providers/probe" && request.method === "POST") {
+      if (!(await AdminAuth.verify(request))) {
+        return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      try {
+        const body = (await request.json()) as { baseUrl: string; apiKey?: string; type?: "openai" | "gemini" | "anthropic" };
+        const result = await ProviderProbe.probe(body);
+        return Response.json(result, { headers: { "Access-Control-Allow-Origin": "*" } });
+      } catch (err) {
+        return Response.json({ valid: false, statusCode: 0, latencyMs: 0, error: String(err) }, { status: 500, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+    }
+
+    if (path === "/api/keys" && request.method === "GET") {
+      if (!(await AdminAuth.verify(request))) {
+        return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      const keys = await storage.getKeys();
+      return Response.json({ keys }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+
+    if (path === "/api/keys" && request.method === "POST") {
+      if (!(await AdminAuth.verify(request))) {
+        return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      const params = (await request.json()) as Partial<ApiKeyRecord>;
+      const record = KeyManager.createKey({
+        name: params.name || "Default Key",
+        expiresAt: params.expiresAt,
+        maxRequests: params.maxRequests,
+        maxTokens: params.maxTokens,
+        maxPromptTokens: params.maxPromptTokens,
+        maxCompletionTokens: params.maxCompletionTokens,
+        requiredHeaders: params.requiredHeaders,
+        requiredBodyKeywords: params.requiredBodyKeywords,
+        allowedModels: params.allowedModels,
+        enabled: params.enabled ?? true,
+      });
+      await storage.saveKey(record);
+      return Response.json({ success: true, key: record }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+
+    if (path.startsWith("/api/keys/") && request.method === "DELETE") {
+      if (!(await AdminAuth.verify(request))) {
+        return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      const id = decodeURIComponent(path.slice("/api/keys/".length));
+      await storage.deleteKey(id);
+      return Response.json({ success: true, deleted: id }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+
+    if (path === "/api/rules" && request.method === "GET") {
+      if (!(await AdminAuth.verify(request))) {
+        return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      const rules = await storage.getRules();
+      return Response.json({ rules }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+
+    if (path === "/api/rules" && request.method === "POST") {
+      if (!(await AdminAuth.verify(request))) {
+        return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      const rule = (await request.json()) as RouteRule;
+      if (!rule.id) rule.id = `rule_${Date.now()}`;
+      rule.enabled = rule.enabled ?? true;
+      await storage.saveRule(rule);
+      return Response.json({ success: true, rule }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+
+    if (path.startsWith("/api/rules/") && request.method === "DELETE") {
+      if (!(await AdminAuth.verify(request))) {
+        return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      const id = decodeURIComponent(path.slice("/api/rules/".length));
+      await storage.deleteRule(id);
+      return Response.json({ success: true, deleted: id }, { headers: { "Access-Control-Allow-Origin": "*" } });
     }
 
     if (path === "/api/logs/clear" && request.method === "POST") {
