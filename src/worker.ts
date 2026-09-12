@@ -217,14 +217,32 @@ export default {
     }
 
     if (path === "/api/combos" && request.method === "GET") {
-      const combos = await storage.getCombos();
-      return Response.json({ combos }, { headers: { "Access-Control-Allow-Origin": "*" } });
+      const q = url.searchParams.get("q")?.toLowerCase().trim();
+      let combos = await storage.getCombos();
+      if (q) {
+        combos = combos.filter(
+          (c) =>
+            c.id.toLowerCase().includes(q) ||
+            c.displayName.toLowerCase().includes(q) ||
+            c.targets.some((t) => t.providerId.toLowerCase().includes(q) || t.model.toLowerCase().includes(q))
+        );
+      }
+      return Response.json({ combos, total: combos.length }, { headers: { "Access-Control-Allow-Origin": "*" } });
     }
 
     // Headless Model & Combo Discovery API (9Router parity)
     if (path === "/api/models" && request.method === "GET") {
-      const combos = await storage.getCombos();
+      const q = url.searchParams.get("q")?.toLowerCase().trim();
+      let combos = await storage.getCombos();
       const providers = await storage.getProviders();
+      if (q) {
+        combos = combos.filter(
+          (c) =>
+            c.id.toLowerCase().includes(q) ||
+            c.displayName.toLowerCase().includes(q) ||
+            c.targets.some((t) => t.providerId.toLowerCase().includes(q) || t.model.toLowerCase().includes(q))
+        );
+      }
       return Response.json({
         models: combos.map((c) => ({
           id: c.id,
@@ -462,8 +480,18 @@ export default {
     }
 
     if (path === "/api/providers" && request.method === "GET") {
-      const providers = await storage.getProviders();
-      return Response.json({ providers }, { headers: { "Access-Control-Allow-Origin": "*" } });
+      const q = url.searchParams.get("q")?.toLowerCase().trim();
+      let providers = await storage.getProviders();
+      if (q) {
+        providers = providers.filter(
+          (p) =>
+            p.id.toLowerCase().includes(q) ||
+            p.name.toLowerCase().includes(q) ||
+            p.type.toLowerCase().includes(q) ||
+            p.baseUrl.toLowerCase().includes(q)
+        );
+      }
+      return Response.json({ providers, total: providers.length }, { headers: { "Access-Control-Allow-Origin": "*" } });
     }
 
     if (path === "/api/providers" && request.method === "POST") {
@@ -544,8 +572,17 @@ export default {
       if (!(await AdminAuth.verify(request, env.ADMIN_PASSWORD))) {
         return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
       }
-      const keys = await storage.getKeys();
-      return Response.json({ keys }, { headers: { "Access-Control-Allow-Origin": "*" } });
+      const q = url.searchParams.get("q")?.toLowerCase().trim();
+      let keys = await storage.getKeys();
+      if (q) {
+        keys = keys.filter(
+          (k) =>
+            k.name.toLowerCase().includes(q) ||
+            k.key.toLowerCase().includes(q) ||
+            (k.allowedModels && k.allowedModels.some((m) => m.toLowerCase().includes(q)))
+        );
+      }
+      return Response.json({ keys, total: keys.length }, { headers: { "Access-Control-Allow-Origin": "*" } });
     }
 
     if (path === "/api/keys" && request.method === "POST") {
@@ -591,8 +628,16 @@ export default {
       if (!(await AdminAuth.verify(request, env.ADMIN_PASSWORD))) {
         return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
       }
-      const rules = await storage.getRules();
-      return Response.json({ rules }, { headers: { "Access-Control-Allow-Origin": "*" } });
+      const q = url.searchParams.get("q")?.toLowerCase().trim();
+      let rules = await storage.getRules();
+      if (q) {
+        rules = rules.filter(
+          (r) =>
+            r.pattern.toLowerCase().includes(q) ||
+            r.target.toLowerCase().includes(q)
+        );
+      }
+      return Response.json({ rules, total: rules.length }, { headers: { "Access-Control-Allow-Origin": "*" } });
     }
 
     if (path === "/api/rules" && request.method === "POST") {
