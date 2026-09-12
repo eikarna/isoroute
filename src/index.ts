@@ -693,4 +693,4 @@ const server = Bun.serve({
   fetch: handleRequest,
 });
 
-console.log(`🚀 EdgeRouter running on http://${server.hostname}:${server.port}`);
+console.log(`EdgeRouter running on http://${server.hostname}:${server.port}`);

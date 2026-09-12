@@ -547,13 +547,13 @@
       let bodyData: any;
       if (bulkSubMode === "pool") {
         if (!bulkKeysInput.trim()) {
-          bulkResultMsg = "❌ Error: Please enter at least 1 API key";
+          bulkResultMsg = "[Error] Please enter at least 1 API key";
           bulkLoading = false;
           return;
         }
         if (bulkTargetProvId === "new") {
           if (!bulkProvName.trim() || !bulkProvUrl.trim()) {
-            bulkResultMsg = "❌ Error: Provider Name and Base URL are required";
+            bulkResultMsg = "[Error] Provider Name and Base URL are required";
             bulkLoading = false;
             return;
           }
@@ -574,7 +574,7 @@
         }
       } else {
         if (!bulkMultiInput.trim()) {
-          bulkResultMsg = "❌ Error: Payload cannot be empty";
+          bulkResultMsg = "[Error] Payload cannot be empty";
           bulkLoading = false;
           return;
         }
@@ -605,18 +605,18 @@
 
       if (res.ok && data.success) {
         if (data.mode === "pool") {
-          bulkResultMsg = `✅ Pooled ${data.addedKeys} keys into "${data.provider?.name || 'provider'}" (Total in pool: ${data.totalKeysInPool}) [${data.durationMs}ms]`;
+          bulkResultMsg = `[OK] Pooled ${data.addedKeys} keys into "${data.provider?.name || 'provider'}" (Total in pool: ${data.totalKeysInPool}) [${data.durationMs}ms]`;
           bulkKeysInput = "";
         } else {
-          bulkResultMsg = `✅ Ingested ${data.total} credentials (${data.saved} saved) [${data.durationMs}ms]`;
+          bulkResultMsg = `[OK] Ingested ${data.total} credentials (${data.saved} saved) [${data.durationMs}ms]`;
           bulkMultiInput = "";
         }
         await reloadStatus();
       } else {
-        bulkResultMsg = `❌ Error: ${data.error || text || "Failed"}`;
+        bulkResultMsg = `[Error] ${data.error || text || "Failed"}`;
       }
     } catch (err: any) {
-      bulkResultMsg = `❌ Error: ${err.message}`;
+      bulkResultMsg = `[Error] ${err.message}`;
     } finally {
       bulkLoading = false;
     }
@@ -670,13 +670,13 @@
         const p = data.stats?.providersSaved ?? 0;
         const c = data.stats?.combosSaved ?? 0;
         const pooled = data.stats?.connectionsPooled ? ` (${data.stats.connectionsPooled} keys pooled)` : "";
-        importResultMsg = `✅ Successfully imported ${p} providers${pooled}, ${c} combos (${data.format.toUpperCase()} format) in ${data.durationMs}ms!`;
+        importResultMsg = `[OK] Successfully imported ${p} providers${pooled}, ${c} combos (${data.format.toUpperCase()} format) in ${data.durationMs}ms!`;
         await reloadStatus();
       } else {
-        importResultMsg = `❌ Error: ${data.error || "Import failed"}`;
+        importResultMsg = `[Error] ${data.error || "Import failed"}`;
       }
     } catch (err: any) {
-      importResultMsg = `❌ Error: ${err.message}`;
+      importResultMsg = `[Error] ${err.message}`;
     } finally {
       importLoading = false;
     }
@@ -951,8 +951,8 @@
           {#if isLive}
             <span class="live-tag"><span class="live-bar"></span>live</span>
           {/if}
-          <button class="btn-subtle mobile-action" title="Export full configuration JSON" onclick={handleExportConfig}>📤 Export</button>
-          <button class="btn-subtle mobile-action" title="Import configuration JSON (IsoRoute or 9Router)" onclick={() => { showImportModal = true; importResultMsg = ''; }}>📥 Import</button>
+          <button class="btn-subtle mobile-action" title="Export full configuration JSON" onclick={handleExportConfig}>Export</button>
+          <button class="btn-subtle mobile-action" title="Import configuration JSON (IsoRoute or 9Router)" onclick={() => { showImportModal = true; importResultMsg = ''; }}>Import</button>
           <a href="/" class="btn-subtle mobile-action">Public</a>
           <button class="btn-subtle mobile-action" onclick={handleLogout}>Sign out</button>
         </div>
@@ -1169,10 +1169,10 @@
 
               <div class="drawer-box">
                 <div class="drawer-header-row">
-                  <div class="drawer-title">{provDrawerMode === 'single' ? "Register provider" : "⚡ Bulk Ingest"}</div>
+                  <div class="drawer-title">{provDrawerMode === 'single' ? "Register provider" : "Bulk Ingest"}</div>
                   <div class="subtab-group">
                     <button class="subtab-btn" class:active={provDrawerMode === 'single'} onclick={() => provDrawerMode = 'single'}>Single</button>
-                    <button class="subtab-btn" class:active={provDrawerMode === 'bulk'} onclick={() => provDrawerMode = 'bulk'}>⚡ Bulk</button>
+                    <button class="subtab-btn" class:active={provDrawerMode === 'bulk'} onclick={() => provDrawerMode = 'bulk'}>Bulk</button>
                   </div>
                 </div>
 
@@ -1284,7 +1284,7 @@
 
                     <div class="action-row">
                       <button class="btn-brand" disabled={bulkLoading || detectedPoolKeyCount === 0} onclick={handleBulkIngest}>
-                        {bulkLoading ? "Ingesting..." : `⚡ Ingest ${detectedPoolKeyCount} Keys into Pool`}
+                        {bulkLoading ? "Ingesting..." : `Ingest ${detectedPoolKeyCount} keys`}
                       </button>
                     </div>
                   {:else}
@@ -1303,13 +1303,13 @@
                     </div>
                     <div class="action-row">
                       <button class="btn-brand" disabled={bulkLoading || !bulkMultiInput.trim()} onclick={handleBulkIngest}>
-                        {bulkLoading ? "Ingesting..." : "⚡ Ingest Multi Batch"}
+                        {bulkLoading ? "Ingesting..." : "Ingest batch"}
                       </button>
                     </div>
                   {/if}
 
                   {#if bulkResultMsg}
-                    <div class="bulk-result-badge" class:badge-err={bulkResultMsg.startsWith('❌')}>{bulkResultMsg}</div>
+                    <div class="bulk-result-badge" class:badge-err={bulkResultMsg.startsWith('[Error]')}>{bulkResultMsg}</div>
                   {/if}
                 {/if}
               </div>
@@ -1675,7 +1675,7 @@
           <div class="modal-backdrop" onclick={() => showImportModal = false} role="presentation">
             <div class="modal-card" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
               <div class="modal-header">
-                <div class="modal-title">📥 Import Configuration</div>
+                <div class="modal-title">Import Configuration</div>
                 <button class="modal-close" onclick={() => showImportModal = false} aria-label="Close">✕</button>
               </div>
 
@@ -1713,7 +1713,7 @@
                 </div>
 
                 {#if importResultMsg}
-                  <div class="bulk-result-badge" class:badge-err={importResultMsg.startsWith('❌')}>
+                  <div class="bulk-result-badge" class:badge-err={importResultMsg.startsWith('[Error]')}>
                     {importResultMsg}
                   </div>
                 {/if}

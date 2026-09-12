@@ -9,7 +9,7 @@ const command = args[0];
 async function main() {
   if (!command || command === "help" || command === "--help") {
     console.log(`
-⚡ EdgeRouter CLI — Serverless AI Gateway Controller
+EdgeRouter CLI — Serverless AI Gateway Controller
 
 Usage:
   bun run src/cli.ts <command> [arguments]
@@ -32,7 +32,7 @@ Options:
       const res = await fetch(`${GATEWAY_URL}/api/status`);
       if (!res.ok) throw new Error(`Gateway returned ${res.status}`);
       const data = await res.json() as any;
-      console.log(`\n⚡ EdgeRouter Status (${GATEWAY_URL}):`);
+      console.log(`\nEdgeRouter Status (${GATEWAY_URL}):`);
       console.log(`- Status:         ${data.status}`);
       console.log(`- Total Requests: ${data.metrics?.totalRequests ?? 0}`);
       console.log(`- Total Tokens:   ${(data.metrics?.totalTokens ?? 0).toLocaleString()}`);
@@ -45,7 +45,7 @@ Options:
     try {
       const res = await fetch(`${GATEWAY_URL}/api/combos`);
       const data = await res.json() as any;
-      console.log(`\n⚡ Active Model Combos (${data.combos?.length ?? 0}):\n`);
+      console.log(`\nActive Model Combos (${data.combos?.length ?? 0}):\n`);
       for (const c of data.combos || []) {
         console.log(`[${c.id}] ${c.displayName}`);
         for (const [idx, t] of (c.targets || []).entries()) {
