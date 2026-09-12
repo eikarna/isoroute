@@ -26,6 +26,11 @@ temp/
 *.log
 *.png
 
+# Backups and exported credentials
+*backup*.json
+*export*.json
+*9router*.json
+
 # OS artifacts
 .DS_Store
 Thumbs.db

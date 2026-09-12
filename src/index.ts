@@ -6,7 +6,8 @@ import { OAuthManager } from "./core/oauth";
 import { AdminAuth } from "./core/auth";
 import { ProviderProbe } from "./core/probe";
 import { KeyManager, type ApiKeyRecord } from "./core/keys";
-import { BulkIngestEngine } from "./core/bulk";
+import { BulkIngestEngine, type BulkParseOptions } from "./core/bulk";
+import { BackupEngine } from "./core/backup";
 import type { RouteRule } from "./core/rewrite";
 import type { ChatCompletionRequest, ModelCombo, Provider } from "./types";
 import DASHBOARD_HTML from "../dist/index.html" with { type: "text" };
@@ -274,6 +275,42 @@ export async function handleRequest(request: Request): Promise<Response> {
       totalCombos: combos.length,
       totalProviders: providers.length,
     }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  // Full Configuration Export
+  if (path === "/api/config/export" && request.method === "GET") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin auth required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const backup = await BackupEngine.exportConfig(storage);
+    const filename = `isoroute-config-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    return Response.json(backup, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  }
+
+  // Full Configuration Import (IsoRoute native or 9Router backup)
+  if (path === "/api/config/import" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin auth required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    try {
+      const mode = (url.searchParams.get("mode") as "merge" | "replace") || "merge";
+      const contentType = request.headers.get("content-type") || "";
+      let payload: any;
+      if (contentType.includes("application/json")) {
+        payload = await request.json();
+      } else {
+        payload = await request.text();
+      }
+      const result = await BackupEngine.importConfig(storage, payload, mode);
+      return Response.json(result, { headers: { "Access-Control-Allow-Origin": "*" } });
+    } catch (err: any) {
+      return Response.json({ success: false, error: err.message }, { status: 400, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
   }
 
   // Bulk Ingest Providers (API keys, OAuth, Cookie sessions, or Key Pooling)

@@ -186,6 +186,13 @@
   let oauthJson = $state("");
   let oauthStatusMsg = $state("");
 
+  // Config Backup & Migration State
+  let showImportModal = $state(false);
+  let importRawJson = $state("");
+  let importMode = $state<"merge" | "replace">("merge");
+  let importLoading = $state(false);
+  let importResultMsg = $state("");
+
   let playModel = $state("");
   let playPrompt = $state("Summarize what an isomorphic edge gateway does in two sentences.");
   let playStream = $state(true);
@@ -615,6 +622,66 @@
     }
   }
 
+  async function handleExportConfig() {
+    try {
+      const res = await fetch("/api/config/export", {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(`Export failed with HTTP ${res.status}`);
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `isoroute-config-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(`Export error: ${err.message}`);
+    }
+  }
+
+  function handleFileSelect(e: Event) {
+    const target = e.target as HTMLInputElement;
+    const file = target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      importRawJson = String(reader.result || "");
+    };
+    reader.readAsText(file);
+  }
+
+  async function handleRunImport() {
+    if (!importRawJson.trim()) return;
+    importLoading = true;
+    importResultMsg = "";
+    try {
+      const res = await fetch(`/api/config/import?mode=${importMode}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: importRawJson.trim(),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const p = data.stats?.providersSaved ?? 0;
+        const c = data.stats?.combosSaved ?? 0;
+        const pooled = data.stats?.connectionsPooled ? ` (${data.stats.connectionsPooled} keys pooled)` : "";
+        importResultMsg = `✅ Successfully imported ${p} providers${pooled}, ${c} combos (${data.format.toUpperCase()} format) in ${data.durationMs}ms!`;
+        await reloadStatus();
+      } else {
+        importResultMsg = `❌ Error: ${data.error || "Import failed"}`;
+      }
+    } catch (err: any) {
+      importResultMsg = `❌ Error: ${err.message}`;
+    } finally {
+      importLoading = false;
+    }
+  }
+
   async function handleAddKey() {
     if (!newKeyName) return;
     let expiresAt: number | undefined = undefined;
@@ -884,6 +951,8 @@
           {#if isLive}
             <span class="live-tag"><span class="live-bar"></span>live</span>
           {/if}
+          <button class="btn-subtle mobile-action" title="Export full configuration JSON" onclick={handleExportConfig}>📤 Export</button>
+          <button class="btn-subtle mobile-action" title="Import configuration JSON (IsoRoute or 9Router)" onclick={() => { showImportModal = true; importResultMsg = ''; }}>📥 Import</button>
           <a href="/" class="btn-subtle mobile-action">Public</a>
           <button class="btn-subtle mobile-action" onclick={handleLogout}>Sign out</button>
         </div>
@@ -1601,6 +1670,64 @@
             </div>
           </div>
         {/if}
+
+        {#if showImportModal}
+          <div class="modal-backdrop" onclick={() => showImportModal = false} role="presentation">
+            <div class="modal-card" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+              <div class="modal-header">
+                <div class="modal-title">📥 Import Configuration</div>
+                <button class="modal-close" onclick={() => showImportModal = false} aria-label="Close">✕</button>
+              </div>
+
+              <div class="modal-body">
+                <div class="bulk-help-banner">
+                  Upload or paste an <strong>IsoRoute</strong> config JSON or a <strong>9Router</strong> backup JSON (<code>9router-backup-*.json</code>). Nodes, connections, and combos will be automatically mapped and pooled!
+                </div>
+
+                <div class="field">
+                  <label for="import-file">Upload JSON File</label>
+                  <input id="import-file" type="file" accept=".json,application/json" onchange={handleFileSelect} />
+                </div>
+
+                <div class="field">
+                  <label for="import-paste">Or Paste Raw JSON</label>
+                  <textarea
+                    id="import-paste"
+                    class="bulk-textarea"
+                    bind:value={importRawJson}
+                    placeholder={`{"providers": [...], "combos": [...]} or 9Router backup JSON`}
+                    rows="6"
+                  ></textarea>
+                </div>
+
+                <div class="field">
+                  <label for="import-strat">Import Strategy</label>
+                  <div id="import-strat" class="sub-mode-selector">
+                    <button class="sub-mode-btn" class:active={importMode === 'merge'} onclick={() => importMode = 'merge'}>
+                      Merge (Keep existing & add new)
+                    </button>
+                    <button class="sub-mode-btn" class:active={importMode === 'replace'} onclick={() => importMode = 'replace'}>
+                      Replace All (Wipe & Restore)
+                    </button>
+                  </div>
+                </div>
+
+                {#if importResultMsg}
+                  <div class="bulk-result-badge" class:badge-err={importResultMsg.startsWith('❌')}>
+                    {importResultMsg}
+                  </div>
+                {/if}
+              </div>
+
+              <div class="modal-footer">
+                <button class="btn-subtle" onclick={() => showImportModal = false}>Cancel</button>
+                <button class="btn-brand" disabled={importLoading || !importRawJson.trim()} onclick={handleRunImport}>
+                  {importLoading ? "Importing..." : "Run Import"}
+                </button>
+              </div>
+            </div>
+          </div>
+        {/if}
       </main>
     </div>
   </div>
@@ -2261,6 +2388,71 @@
     word-break: break-word;
     max-height: 460px;
     overflow-y: auto;
+  }
+
+  /* Modal Backdrop & Card */
+  .modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 999;
+    padding: 16px;
+  }
+  .modal-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: 100%;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+    animation: modalIn 150ms ease-out;
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .modal-title { font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
+  .modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 6px;
+  }
+  .modal-close:hover { color: var(--text); }
+  .modal-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 75vh;
+    overflow-y: auto;
+  }
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.01);
   }
 
   .desktop-only { display: block; }
