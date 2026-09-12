@@ -1,14 +1,24 @@
 // Lightweight Web Crypto Administrative Authentication (default password: 123456)
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "123456";
-const AUTH_SECRET = process.env.AUTH_SECRET || "edge-router-secret-salt-2026";
+function getEnvSafe(key: string, fallback: string): string {
+  try {
+    if (typeof process !== "undefined" && process?.env && process.env[key]) {
+      return process.env[key]!;
+    }
+  } catch {}
+  return fallback;
+}
+
+const ADMIN_PASSWORD = getEnvSafe("ADMIN_PASSWORD", "123456");
+const AUTH_SECRET = getEnvSafe("AUTH_SECRET", "isoroute-secret-salt-2026");
 
 export class AdminAuth {
   /**
    * Verify password and issue signed session token
    */
-  static async login(password: string): Promise<{ success: boolean; token?: string; error?: string }> {
-    if (password !== ADMIN_PASSWORD) {
+  static async login(password: string, expectedPassword?: string): Promise<{ success: boolean; token?: string; error?: string }> {
+    const targetPassword = expectedPassword || ADMIN_PASSWORD;
+    if (password !== targetPassword) {
       return { success: false, error: "Invalid administrative password" };
     }
 

@@ -7,8 +7,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "edge-router-db",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+      "database_name": "isoroute-db",
+      "database_id": "7b5446c0-5080-4451-84a2-19079d83cc7d"
     }
   ],
   "observability": {

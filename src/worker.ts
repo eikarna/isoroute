@@ -150,7 +150,7 @@ export default {
     if (path === "/api/auth/login" && request.method === "POST") {
       try {
         const { password } = (await request.json()) as { password?: string };
-        const authRes = await AdminAuth.login(password || "");
+        const authRes = await AdminAuth.login(password || "", env.ADMIN_PASSWORD);
         if (authRes.success) {
           return Response.json(
             { success: true, token: authRes.token },
@@ -328,19 +328,28 @@ export default {
       if (!(await AdminAuth.verify(request))) {
         return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
       }
-      const params = (await request.json()) as Partial<ApiKeyRecord>;
-      const record = KeyManager.createKey({
-        name: params.name || "Default Key",
-        expiresAt: params.expiresAt,
-        maxRequests: params.maxRequests,
-        maxTokens: params.maxTokens,
-        maxPromptTokens: params.maxPromptTokens,
-        maxCompletionTokens: params.maxCompletionTokens,
-        requiredHeaders: params.requiredHeaders,
-        requiredBodyKeywords: params.requiredBodyKeywords,
-        allowedModels: params.allowedModels,
-        enabled: params.enabled ?? true,
-      });
+      const body = (await request.json()) as Partial<ApiKeyRecord>;
+      const id = body.id || KeyManager.generateSecretKey("key_");
+      const rawKey = body.key || KeyManager.generateSecretKey("er-live-");
+      const record: ApiKeyRecord = {
+        id,
+        name: body.name || "Default Key",
+        key: rawKey,
+        createdAt: body.createdAt || Date.now(),
+        expiresAt: body.expiresAt,
+        maxRequests: body.maxRequests,
+        maxTokens: body.maxTokens,
+        maxPromptTokens: body.maxPromptTokens,
+        maxCompletionTokens: body.maxCompletionTokens,
+        usedRequests: body.usedRequests || 0,
+        usedTokens: body.usedTokens || 0,
+        usedPromptTokens: body.usedPromptTokens || 0,
+        usedCompletionTokens: body.usedCompletionTokens || 0,
+        requiredHeaders: body.requiredHeaders,
+        requiredBodyKeywords: body.requiredBodyKeywords,
+        allowedModels: body.allowedModels,
+        enabled: body.enabled ?? true,
+      };
       await storage.saveKey(record);
       return Response.json({ success: true, key: record }, { headers: { "Access-Control-Allow-Origin": "*" } });
     }
