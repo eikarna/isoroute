@@ -201,7 +201,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
       c.displayName,
       c.description ?? null,
       JSON.stringify(c.targets),
-      c.enabled ? 1 : 0
+      c.enabled !== false ? 1 : 0
     );
   }
 
@@ -507,7 +507,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
           c.displayName,
           c.description ?? null,
           JSON.stringify(c.targets),
-          c.enabled ? 1 : 0
+          c.enabled !== false ? 1 : 0
         );
       }
     });

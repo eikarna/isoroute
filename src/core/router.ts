@@ -122,7 +122,7 @@ export class EdgeRouter {
         }
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), target.timeoutMs || 30000);
+        const timeout = setTimeout(() => controller.abort(), target.timeoutMs || 60000);
 
         const upstreamRes = await fetch(upstreamUrl, {
           method: "POST",
@@ -135,14 +135,14 @@ export class EdgeRouter {
         const latencyMs = Date.now() - startMs;
 
         // Circuit Breaker & Failover check
-        if ([429, 500, 502, 503, 504].includes(upstreamRes.status)) {
-          if (token && upstreamRes.status === 429) {
-            KeyPoolManager.markCooldown(token, 180000); // 3 minutes cooldown on 429
+        if ([401, 403, 429, 500, 502, 503, 504].includes(upstreamRes.status)) {
+          if (token && [401, 403, 429].includes(upstreamRes.status)) {
+            KeyPoolManager.markCooldown(token, 180000); // 3 minutes cooldown on bad/rate-limited keys
           }
-          const errBody = await upstreamRes.text();
-          console.warn(`[Failover] Target ${provider.id}/${target.model} returned ${upstreamRes.status}. Cascading...`);
-          lastError = { status: upstreamRes.status, message: errBody };
-          continue;
+          const errText = await upstreamRes.text();
+          console.warn(`[Failover] Target ${target.providerId}/${target.model} returned ${upstreamRes.status}. Cascading...`);
+          lastError = { status: upstreamRes.status, message: errText };
+          continue; // Try next cascade target!
         }
 
         // Success!
@@ -331,13 +331,15 @@ export class EdgeRouter {
   private async resolveTargets(modelName: string): Promise<TargetRoute[]> {
     // 1. Check if model matches an active combo
     const combo = await this.storage.getCombo(modelName);
-    if (combo && combo.enabled && combo.targets.length > 0) {
+    if (combo && combo.enabled !== false && combo.targets.length > 0) {
       return [...combo.targets].sort((a, b) => (b.priority || 0) - (a.priority || 0));
     }
 
     // 2. Check if model matches a direct provider format: "providerId/modelName"
     if (modelName.includes("/")) {
-      const [providerId, rawModel] = modelName.split("/", 2);
+      const slashIdx = modelName.indexOf("/");
+      const providerId = modelName.slice(0, slashIdx);
+      const rawModel = modelName.slice(slashIdx + 1);
       const provider = await this.storage.getProvider(providerId);
       if (provider) {
         return [{ providerId, model: rawModel }];

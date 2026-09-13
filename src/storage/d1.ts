@@ -125,7 +125,7 @@ export class D1StorageAdapter implements StorageAdapter {
       c.displayName,
       c.description ?? null,
       JSON.stringify(c.targets),
-      c.enabled ? 1 : 0
+      c.enabled !== false ? 1 : 0
     ).run();
   }
 
@@ -416,7 +416,7 @@ export class D1StorageAdapter implements StorageAdapter {
           c.displayName,
           c.description ?? null,
           JSON.stringify(c.targets),
-          c.enabled ? 1 : 0
+          c.enabled !== false ? 1 : 0
         )
       );
       await this.db.batch(stmts);

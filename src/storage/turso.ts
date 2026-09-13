@@ -261,13 +261,13 @@ export class TursoStorageAdapter implements StorageAdapter {
   async saveCombo(c: ModelCombo): Promise<void> {
     await this.execute(
       `INSERT INTO combos (id, display_name, description, targets_json, enabled)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         display_name = excluded.display_name,
-         description = excluded.description,
-         targets_json = excluded.targets_json,
-         enabled = excluded.enabled;`,
-      [c.id, c.displayName, c.description ?? null, JSON.stringify(c.targets), c.enabled ? 1 : 0]
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          display_name = excluded.display_name,
+          description = excluded.description,
+          targets_json = excluded.targets_json,
+          enabled = excluded.enabled;`,
+      [c.id, c.displayName, c.description ?? null, JSON.stringify(c.targets), c.enabled !== false ? 1 : 0]
     );
   }
 
@@ -582,7 +582,7 @@ export class TursoStorageAdapter implements StorageAdapter {
             { type: "text", value: c.displayName },
             c.description ? { type: "text", value: c.description } : { type: "null" },
             { type: "text", value: JSON.stringify(c.targets) },
-            { type: "integer", value: c.enabled ? 1 : 0 },
+            { type: "integer", value: c.enabled !== false ? 1 : 0 },
           ],
         },
       }));

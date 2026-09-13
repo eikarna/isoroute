@@ -8,7 +8,7 @@ export class OAuthManager {
    */
   static async getValidAccessToken(provider: Provider): Promise<string | undefined> {
     if (!provider.oauth) {
-      return provider.apiKey;
+      return undefined;
     }
 
     const oauth = provider.oauth;

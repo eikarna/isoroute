@@ -199,6 +199,7 @@ export class BackupEngine {
           id,
           displayName,
           targets,
+          enabled: c.enabled !== false,
         });
       }
     }
