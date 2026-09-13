@@ -22,6 +22,8 @@ export interface Provider {
   enabled: boolean;
 }
 
+export type ComboStrategy = "fallback" | "round-robin" | "latency-first" | "ttft-first";
+
 export interface TargetRoute {
   providerId: string;
   model: string;
@@ -35,6 +37,7 @@ export interface ModelCombo {
   description?: string;
   targets: TargetRoute[];
   enabled: boolean;
+  strategy?: ComboStrategy;
 }
 
 export interface ImageUrlBlock {

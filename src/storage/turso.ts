@@ -123,7 +123,8 @@ export class TursoStorageAdapter implements StorageAdapter {
         display_name TEXT NOT NULL,
         description TEXT,
         targets_json TEXT NOT NULL,
-        enabled INTEGER DEFAULT 1
+        enabled INTEGER DEFAULT 1,
+        strategy TEXT DEFAULT 'fallback'
       );`,
       `CREATE TABLE IF NOT EXISTS telemetry_logs (
         id TEXT PRIMARY KEY,
@@ -242,6 +243,7 @@ export class TursoStorageAdapter implements StorageAdapter {
       description: r.description ?? undefined,
       targets: JSON.parse(r.targets_json),
       enabled: Boolean(r.enabled),
+      strategy: (r.strategy as any) || "fallback",
     }));
   }
 
@@ -255,19 +257,21 @@ export class TursoStorageAdapter implements StorageAdapter {
       description: r.description ?? undefined,
       targets: JSON.parse(r.targets_json),
       enabled: Boolean(r.enabled),
+      strategy: (r.strategy as any) || "fallback",
     };
   }
 
   async saveCombo(c: ModelCombo): Promise<void> {
     await this.execute(
-      `INSERT INTO combos (id, display_name, description, targets_json, enabled)
-        VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO combos (id, display_name, description, targets_json, enabled, strategy)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           display_name = excluded.display_name,
           description = excluded.description,
           targets_json = excluded.targets_json,
-          enabled = excluded.enabled;`,
-      [c.id, c.displayName, c.description ?? null, JSON.stringify(c.targets), c.enabled !== false ? 1 : 0]
+          enabled = excluded.enabled,
+          strategy = excluded.strategy;`,
+      [c.id, c.displayName, c.description ?? null, JSON.stringify(c.targets), c.enabled !== false ? 1 : 0, c.strategy || "fallback"]
     );
   }
 
@@ -570,19 +574,21 @@ export class TursoStorageAdapter implements StorageAdapter {
       const requests = chunk.map((c) => ({
         type: "execute",
         stmt: {
-          sql: `INSERT INTO combos (id, display_name, description, targets_json, enabled)
-                VALUES (?, ?, ?, ?, ?)
+          sql: `INSERT INTO combos (id, display_name, description, targets_json, enabled, strategy)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   display_name = excluded.display_name,
                   description = excluded.description,
                   targets_json = excluded.targets_json,
-                  enabled = excluded.enabled;`,
+                  enabled = excluded.enabled,
+                  strategy = excluded.strategy;`,
           args: [
             { type: "text", value: c.id },
             { type: "text", value: c.displayName },
             c.description ? { type: "text", value: c.description } : { type: "null" },
             { type: "text", value: JSON.stringify(c.targets) },
             { type: "integer", value: c.enabled !== false ? 1 : 0 },
+            { type: "text", value: c.strategy || "fallback" },
           ],
         },
       }));

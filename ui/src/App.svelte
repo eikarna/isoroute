@@ -154,6 +154,7 @@
   let newComboName = $state("");
   let newComboProvider = $state("");
   let newComboModel = $state("");
+  let newComboStrategy = $state<"fallback" | "round-robin" | "latency-first" | "ttft-first">("fallback");
   let availableModels = $state<string[]>([]);
   let fetchingModels = $state(false);
 
@@ -528,6 +529,7 @@
       body: JSON.stringify({
         id: newComboId.trim().toLowerCase(),
         displayName: newComboName.trim(),
+        strategy: newComboStrategy,
         enabled: true,
         targets: [{ providerId: newComboProvider, model: newComboModel.trim(), priority: 10 }],
       }),
@@ -535,6 +537,7 @@
     newComboId = "";
     newComboName = "";
     newComboModel = "";
+    newComboStrategy = "fallback";
     await refreshData();
   }
 
@@ -1436,6 +1439,7 @@
                       <div class="title-group">
                         <code class="item-slug accent">{combo.id}</code>
                         <span class="item-name">{combo.displayName}</span>
+                        <span class="strat-badge strat-{combo.strategy || 'fallback'}">{combo.strategy || 'fallback'}</span>
                       </div>
                       <button class="btn-danger" onclick={() => handleDeleteCombo(combo.id)}>Delete</button>
                     </div>
@@ -1497,6 +1501,15 @@
                     <datalist id="models-dl">
                       {#each availableModels as m}<option value={m}></option>{/each}
                     </datalist>
+                  </div>
+                  <div class="field">
+                    <label for="c-strat">Routing Strategy</label>
+                    <select id="c-strat" bind:value={newComboStrategy}>
+                      <option value="fallback">fallback (Priority Cascading)</option>
+                      <option value="round-robin">round-robin (Load Balancing)</option>
+                      <option value="latency-first">latency-first (Lowest Latency)</option>
+                      <option value="ttft-first">ttft-first (Fastest First Token)</option>
+                    </select>
                   </div>
                   <button class="btn-brand" onclick={handleAddCombo}>Create</button>
                 </div>
@@ -2347,6 +2360,20 @@
     border-radius: 3px;
     padding: 1px 5px;
   }
+  .strat-badge {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-radius: 3px;
+    padding: 1px 5px;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+  }
+  .strat-fallback { border-color: rgba(255,255,255,0.1); color: var(--text-dim); }
+  .strat-round-robin { border-color: rgba(56, 189, 248, 0.3); color: #38bdf8; background: rgba(56, 189, 248, 0.05); }
+  .strat-latency-first { border-color: rgba(74, 222, 128, 0.3); color: #4ade80; background: rgba(74, 222, 128, 0.05); }
+  .strat-ttft-first { border-color: rgba(251, 191, 36, 0.3); color: #fbbf24; background: rgba(251, 191, 36, 0.05); }
 
   .detail-row { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
   .d-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); min-width: 64px; text-transform: uppercase; letter-spacing: 0.04em; }

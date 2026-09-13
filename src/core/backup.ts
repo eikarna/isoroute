@@ -200,6 +200,7 @@ export class BackupEngine {
           displayName,
           targets,
           enabled: c.enabled !== false,
+          strategy: c.strategy || "fallback",
         });
       }
     }

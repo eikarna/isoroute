@@ -4,10 +4,14 @@ export function createKeepAliveStream(
   upstreamStream: ReadableStream<Uint8Array>,
   options: {
     pingIntervalMs?: number;
+    streamStartTime?: number;
+    onTtft?: (ttftMs: number) => void;
     onUsage?: (usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }) => void;
   } = {}
 ): ReadableStream<Uint8Array> {
   const pingInterval = options.pingIntervalMs ?? 15000;
+  const startTime = options.streamStartTime || Date.now();
+  let firstChunkLogged = false;
   let timer: ReturnType<typeof setInterval> | null = null;
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -24,6 +28,10 @@ export function createKeepAliveStream(
       }, pingInterval);
     },
     transform(chunk, controller) {
+      if (!firstChunkLogged && options.onTtft) {
+        firstChunkLogged = true;
+        options.onTtft(Date.now() - startTime);
+      }
       controller.enqueue(chunk);
 
       if (options.onUsage) {

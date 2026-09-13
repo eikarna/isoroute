@@ -9,6 +9,7 @@ import { AnthropicAdapter } from "../adapters/anthropic";
 import { RequestSanitizer } from "./sanitizer";
 import { RewriteEngine } from "./rewrite";
 import { KeyManager, type ApiKeyRecord } from "./keys";
+import { MetricsEngine } from "./metrics";
 
 export class EdgeRouter {
   constructor(private storage: StorageAdapter, private onLog?: (log: TelemetryLog) => void) {}
@@ -189,6 +190,10 @@ export class EdgeRouter {
             } else {
               transformedStream = createKeepAliveStream(upstreamRes.body, {
                 pingIntervalMs: 15000,
+                streamStartTime: startMs,
+                onTtft: (ttftMs) => {
+                  MetricsEngine.record(target.providerId, target.model, ttftMs, ttftMs);
+                },
                 onUsage: onUsageCallback,
               });
             }
@@ -285,6 +290,8 @@ export class EdgeRouter {
             completionTokens: usage?.completion_tokens ?? 0,
           });
 
+          MetricsEngine.record(target.providerId, target.model, latencyMs, latencyMs);
+
           if (matchedApiKey) {
             this.storage.deductKeyUsage(matchedApiKey.id, {
               requests: 1,
@@ -332,7 +339,7 @@ export class EdgeRouter {
     // 1. Check if model matches an active combo
     const combo = await this.storage.getCombo(modelName);
     if (combo && combo.enabled !== false && combo.targets.length > 0) {
-      return [...combo.targets].sort((a, b) => (b.priority || 0) - (a.priority || 0));
+      return MetricsEngine.sortTargets(combo.targets, combo.strategy || "fallback", combo.id);
     }
 
     // 2. Check if model matches a direct provider format: "providerId/modelName"

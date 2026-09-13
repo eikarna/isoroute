@@ -96,6 +96,7 @@ export class D1StorageAdapter implements StorageAdapter {
       description: r.description ?? undefined,
       targets: JSON.parse(r.targets_json),
       enabled: Boolean(r.enabled),
+      strategy: (r.strategy as any) || "fallback",
     }));
   }
 
@@ -108,24 +109,27 @@ export class D1StorageAdapter implements StorageAdapter {
       description: r.description ?? undefined,
       targets: JSON.parse(r.targets_json),
       enabled: Boolean(r.enabled),
+      strategy: (r.strategy as any) || "fallback",
     };
   }
 
   async saveCombo(c: ModelCombo): Promise<void> {
     await this.db.prepare(`
-      INSERT INTO combos (id, display_name, description, targets_json, enabled)
-      VALUES (?1, ?2, ?3, ?4, ?5)
+      INSERT INTO combos (id, display_name, description, targets_json, enabled, strategy)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
       ON CONFLICT(id) DO UPDATE SET
         display_name = excluded.display_name,
         description = excluded.description,
         targets_json = excluded.targets_json,
-        enabled = excluded.enabled;
+        enabled = excluded.enabled,
+        strategy = excluded.strategy;
     `).bind(
       c.id,
       c.displayName,
       c.description ?? null,
       JSON.stringify(c.targets),
-      c.enabled !== false ? 1 : 0
+      c.enabled !== false ? 1 : 0,
+      c.strategy || "fallback"
     ).run();
   }
 
@@ -404,19 +408,21 @@ export class D1StorageAdapter implements StorageAdapter {
       const chunk = combos.slice(i, i + chunkSize);
       const stmts = chunk.map((c) =>
         this.db.prepare(`
-          INSERT INTO combos (id, display_name, description, targets_json, enabled)
-          VALUES (?1, ?2, ?3, ?4, ?5)
+          INSERT INTO combos (id, display_name, description, targets_json, enabled, strategy)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
           ON CONFLICT(id) DO UPDATE SET
             display_name = excluded.display_name,
             description = excluded.description,
             targets_json = excluded.targets_json,
-            enabled = excluded.enabled;
+            enabled = excluded.enabled,
+            strategy = excluded.strategy;
         `).bind(
           c.id,
           c.displayName,
           c.description ?? null,
           JSON.stringify(c.targets),
-          c.enabled !== false ? 1 : 0
+          c.enabled !== false ? 1 : 0,
+          c.strategy || "fallback"
         )
       );
       await this.db.batch(stmts);
