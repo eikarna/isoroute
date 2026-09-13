@@ -685,7 +685,7 @@
           bulkResultMsg = `[OK] Ingested ${data.total} credentials (${data.saved} saved) [${data.durationMs}ms]`;
           bulkMultiInput = "";
         }
-        await reloadStatus();
+        await refreshData(true);
       } else {
         bulkResultMsg = `[Error] ${data.error || text || "Failed"}`;
       }
@@ -745,7 +745,7 @@
         const c = data.stats?.combosSaved ?? 0;
         const pooled = data.stats?.connectionsPooled ? ` (${data.stats.connectionsPooled} keys pooled)` : "";
         importResultMsg = `[OK] Successfully imported ${p} providers${pooled}, ${c} combos (${data.format.toUpperCase()} format) in ${data.durationMs}ms!`;
-        await reloadStatus();
+        await refreshData(true);
       } else {
         importResultMsg = `[Error] ${data.error || "Import failed"}`;
       }
