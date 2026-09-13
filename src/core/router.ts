@@ -47,6 +47,13 @@ export class EdgeRouter {
       isAdmin = true;
     }
 
+    // 2. Force Routing / Rewrite Rules (e.g. "claude-*-opus" -> "gemini-*-latest")
+    const rules = await this.storage.getRules();
+    const rewriteRes = RewriteEngine.rewrite(body.model, rules);
+    const requestedModel = rewriteRes.targetModel;
+    const originalModel = body.model;
+    body.model = requestedModel;
+
     if (allKeys.length > 0 && !isAdmin) {
       if (!matchedApiKey) {
         return Response.json(
@@ -90,36 +97,6 @@ export class EdgeRouter {
       }
     }
 
-    // 2. Force Routing / Rewrite Rules (e.g. "claude-*-opus" -> "gemini-*-latest")
-    const rules = await this.storage.getRules();
-    const rewriteRes = RewriteEngine.rewrite(body.model, rules);
-    const requestedModel = rewriteRes.targetModel;
-    body.model = requestedModel;
-
-    // Security check: if key has allowedModels, make sure rewritten model is ALSO permitted!
-    if (matchedApiKey && matchedApiKey.allowedModels && matchedApiKey.allowedModels.length > 0) {
-      const isAllowedPostRewrite = matchedApiKey.allowedModels.some((pattern) => {
-        try {
-          const regex = RewriteEngine.compilePattern(pattern.trim());
-          return regex.test(requestedModel);
-        } catch {
-          return pattern.trim() === requestedModel;
-        }
-      });
-      if (!isAllowedPostRewrite) {
-        return Response.json(
-          {
-            error: {
-              message: `Target model '${requestedModel}' after rewrite is not authorized for this API key`,
-              type: "permission_error",
-              code: "unauthorized",
-            },
-          },
-          { status: 403 }
-        );
-      }
-    }
-
     const isStream = Boolean(body.stream);
     const startMs = Date.now();
 
@@ -146,17 +123,21 @@ export class EdgeRouter {
       const provider = await this.storage.getProvider(target.providerId);
       if (!provider || !provider.enabled) continue;
 
-      // Select active healthy key from pool or OAuth JIT
-      const oauthToken = await OAuthManager.getValidAccessToken(provider);
-      const token = oauthToken || KeyPoolManager.selectKey(provider);
+      const providerKeys = KeyPoolManager.extractKeys(provider);
+      const maxKeyAttempts = providerKeys.length > 0 ? Math.min(providerKeys.length, 3) : 1;
 
-      try {
-        let upstreamUrl = "";
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-          ...(provider.headers || {}),
-        };
-        let upstreamBody: unknown;
+      for (let keyAttempt = 0; keyAttempt < maxKeyAttempts; keyAttempt++) {
+        // Select active healthy key from pool or OAuth JIT
+        const oauthToken = await OAuthManager.getValidAccessToken(provider);
+        const token = oauthToken || KeyPoolManager.selectKey(provider);
+
+        try {
+          let upstreamUrl = "";
+          const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+            ...(provider.headers || {}),
+          };
+          let upstreamBody: unknown;
 
         // -----------------------------------------------------------------
         // Protocol Adapters
@@ -207,9 +188,12 @@ export class EdgeRouter {
             KeyPoolManager.markCooldown(token, 180000); // 3 minutes cooldown on bad/rate-limited keys
           }
           const errText = await upstreamRes.text();
-          console.warn(`[Failover] Target ${target.providerId}/${target.model} returned ${upstreamRes.status}. Cascading...`);
+          console.warn(`[Failover] Target ${target.providerId}/${target.model} returned ${upstreamRes.status} (key attempt ${keyAttempt + 1}/${maxKeyAttempts}).`);
           lastError = { status: upstreamRes.status, message: errText };
-          continue; // Try next cascade target!
+          if (token && [401, 403, 429].includes(upstreamRes.status) && keyAttempt + 1 < maxKeyAttempts) {
+            continue; // Try next key in same provider!
+          }
+          break; // Try next cascade target!
         }
 
         // Success!
@@ -386,6 +370,9 @@ export class EdgeRouter {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[Failover] Network error on ${provider.id}/${target.model}: ${msg}`);
         lastError = { status: 504, message: msg };
+        if (keyAttempt + 1 < maxKeyAttempts) continue;
+        break;
+      }
       }
     }
 

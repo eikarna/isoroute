@@ -114,7 +114,7 @@ describe("Security Model Isolation & Consumer Key Sandbox", () => {
     const res = await router.dispatch(req, { model: "kimi-latest", messages: [] });
     expect(res.status).toBe(403);
     const body = (await res.json()) as any;
-    expect(body.error.message).toContain("after rewrite is not authorized");
+    expect(body.error.message).toContain("not authorized for this API key");
   });
 
   it("filters /v1/models strictly to only allowed models for the consumer key", async () => {
