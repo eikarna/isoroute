@@ -69,12 +69,23 @@ export class MemoryStorageAdapter implements StorageAdapter {
   private logs: TelemetryLog[] = [];
   private totalTokens = 0;
 
-  constructor(initialData?: { providers?: Provider[]; combos?: ModelCombo[] }) {
+  constructor(initialData?: {
+    providers?: Provider[];
+    combos?: ModelCombo[];
+    apiKeys?: ApiKeyRecord[];
+    rules?: RouteRule[];
+  }) {
     if (initialData?.providers) {
       for (const p of initialData.providers) this.providers.set(p.id, p);
     }
     if (initialData?.combos) {
       for (const c of initialData.combos) this.combos.set(c.id, c);
+    }
+    if (initialData?.apiKeys) {
+      for (const k of initialData.apiKeys) this.keys.set(k.id, k);
+    }
+    if (initialData?.rules) {
+      for (const r of initialData.rules) this.rules.set(r.id, r);
     }
   }
 

@@ -121,7 +121,67 @@ export default {
 
     // 1. OpenAI Chat Completions & Models
     if (path === "/v1/models" && request.method === "GET") {
-      const combos = await storage.getCombos();
+      const authHeader = request.headers.get("Authorization");
+      let clientKey = "";
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        clientKey = authHeader.slice(7).trim();
+      }
+
+      const allKeys = await storage.getKeys();
+      let matchedApiKey: ApiKeyRecord | null = null;
+      let isAdmin = false;
+
+      if (clientKey) {
+        if (env.ADMIN_PASSWORD && clientKey === env.ADMIN_PASSWORD) {
+          isAdmin = true;
+        } else if (await AdminAuth.verify(request, env.ADMIN_PASSWORD)) {
+          isAdmin = true;
+        } else {
+          matchedApiKey = await storage.getKey(clientKey);
+        }
+      } else if (await AdminAuth.verify(request, env.ADMIN_PASSWORD)) {
+        isAdmin = true;
+      }
+
+      // If consumer keys exist in system, enforce authentication
+      if (allKeys.length > 0 && !isAdmin) {
+        if (!matchedApiKey) {
+          return Response.json(
+            { error: { message: "Invalid or missing API key", type: "authentication_error", code: 401 } },
+            { status: 401, headers: { "Access-Control-Allow-Origin": "*" } }
+          );
+        }
+        if (!matchedApiKey.enabled) {
+          return Response.json(
+            { error: { message: "API key is disabled", type: "permission_error", code: 403 } },
+            { status: 403, headers: { "Access-Control-Allow-Origin": "*" } }
+          );
+        }
+        if (matchedApiKey.expiresAt && matchedApiKey.expiresAt > 0 && Date.now() > matchedApiKey.expiresAt) {
+          return Response.json(
+            { error: { message: "API key has expired", type: "permission_error", code: 403 } },
+            { status: 403, headers: { "Access-Control-Allow-Origin": "*" } }
+          );
+        }
+      }
+
+      let combos = await storage.getCombos();
+      combos = combos.filter((c) => c.enabled !== false);
+
+      // Scoped Model Isolation: Only expose models authorized for this consumer key!
+      if (matchedApiKey && matchedApiKey.allowedModels && matchedApiKey.allowedModels.length > 0) {
+        combos = combos.filter((c) => {
+          return matchedApiKey!.allowedModels!.some((pattern) => {
+            try {
+              const regex = RewriteEngine.compilePattern(pattern.trim());
+              return regex.test(c.id);
+            } catch {
+              return pattern.trim() === c.id;
+            }
+          });
+        });
+      }
+
       const models = combos.map((c) => ({
         id: c.id,
         object: "model",

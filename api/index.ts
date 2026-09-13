@@ -132,7 +132,80 @@ export default async function handler(request: Request): Promise<Response> {
     }
   }
 
-  // 2. Chat Completions Proxy
+  // 2. Chat Completions Proxy & Models
+  if (path === "/v1/models" && request.method === "GET") {
+    const { storage } = await getRouter();
+    const authHeader = request.headers.get("Authorization");
+    let clientKey = "";
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      clientKey = authHeader.slice(7).trim();
+    }
+
+    const allKeys = await storage.getKeys();
+    let matchedApiKey: ApiKeyRecord | null = null;
+    let isAdmin = false;
+
+    if (clientKey) {
+      if (await AdminAuth.verify(request)) {
+        isAdmin = true;
+      } else {
+        matchedApiKey = await storage.getKey(clientKey);
+      }
+    } else if (await AdminAuth.verify(request)) {
+      isAdmin = true;
+    }
+
+    if (allKeys.length > 0 && !isAdmin) {
+      if (!matchedApiKey) {
+        return Response.json(
+          { error: { message: "Invalid or missing API key", type: "authentication_error", code: 401 } },
+          { status: 401, headers: { "Access-Control-Allow-Origin": "*" } }
+        );
+      }
+      if (!matchedApiKey.enabled) {
+        return Response.json(
+          { error: { message: "API key is disabled", type: "permission_error", code: 403 } },
+          { status: 403, headers: { "Access-Control-Allow-Origin": "*" } }
+        );
+      }
+      if (matchedApiKey.expiresAt && matchedApiKey.expiresAt > 0 && Date.now() > matchedApiKey.expiresAt) {
+        return Response.json(
+          { error: { message: "API key has expired", type: "permission_error", code: 403 } },
+          { status: 403, headers: { "Access-Control-Allow-Origin": "*" } }
+        );
+      }
+    }
+
+    let combos = await storage.getCombos();
+    combos = combos.filter((c) => c.enabled !== false);
+
+    if (matchedApiKey && matchedApiKey.allowedModels && matchedApiKey.allowedModels.length > 0) {
+      combos = combos.filter((c) => {
+        return matchedApiKey!.allowedModels!.some((pattern) => {
+          try {
+            const regex = RewriteEngine.compilePattern(pattern.trim());
+            return regex.test(c.id);
+          } catch {
+            return pattern.trim() === c.id;
+          }
+        });
+      });
+    }
+
+    const models = combos.map((c) => ({
+      id: c.id,
+      object: "model",
+      created: 1700000000,
+      owned_by: "edge-router",
+      display_name: c.displayName,
+    }));
+
+    return Response.json(
+      { object: "list", data: models },
+      { headers: { "Access-Control-Allow-Origin": "*" } }
+    );
+  }
+
   if (path === "/v1/chat/completions" && request.method === "POST") {
     try {
       const body = (await request.json()) as ChatCompletionRequest;

@@ -10,6 +10,7 @@ import { RequestSanitizer } from "./sanitizer";
 import { RewriteEngine } from "./rewrite";
 import { KeyManager, type ApiKeyRecord } from "./keys";
 import { MetricsEngine } from "./metrics";
+import { AdminAuth } from "./auth";
 
 export class EdgeRouter {
   constructor(private storage: StorageAdapter, private onLog?: (log: TelemetryLog) => void) {}
@@ -25,26 +26,67 @@ export class EdgeRouter {
    * Main dispatch entry for /v1/chat/completions
    */
   async dispatch(req: Request, body: ChatCompletionRequest): Promise<Response> {
-    // 1. API Key Auth & Quota Enforcement (if client key is supplied)
+    // 1. API Key Auth & Quota Enforcement
     let matchedApiKey: ApiKeyRecord | null = null;
     const authHeader = req.headers.get("Authorization");
+    let clientKey = "";
     if (authHeader && authHeader.startsWith("Bearer ")) {
-      const clientKey = authHeader.slice(7).trim();
-      matchedApiKey = await this.storage.getKey(clientKey);
-      if (matchedApiKey) {
-        const keyVal = KeyManager.validate(req, body, matchedApiKey);
-        if (!keyVal.valid) {
-          return Response.json(
-            {
-              error: {
-                message: keyVal.error,
-                type: "permission_error",
-                code: keyVal.statusCode === 429 ? "quota_exceeded" : "unauthorized",
-              },
+      clientKey = authHeader.slice(7).trim();
+    }
+
+    const allKeys = await this.storage.getKeys();
+    let isAdmin = false;
+
+    if (clientKey) {
+      if (await AdminAuth.verify(req)) {
+        isAdmin = true;
+      } else {
+        matchedApiKey = await this.storage.getKey(clientKey);
+      }
+    } else if (await AdminAuth.verify(req)) {
+      isAdmin = true;
+    }
+
+    if (allKeys.length > 0 && !isAdmin) {
+      if (!matchedApiKey) {
+        return Response.json(
+          {
+            error: {
+              message: "Invalid or missing API key. Please provide a valid Authorization: Bearer <key> header.",
+              type: "authentication_error",
+              code: "invalid_api_key",
             },
-            { status: keyVal.statusCode || 403 }
-          );
-        }
+          },
+          { status: 401 }
+        );
+      }
+
+      const keyVal = KeyManager.validate(req, body, matchedApiKey);
+      if (!keyVal.valid) {
+        return Response.json(
+          {
+            error: {
+              message: keyVal.error,
+              type: "permission_error",
+              code: keyVal.statusCode === 429 ? "quota_exceeded" : "unauthorized",
+            },
+          },
+          { status: keyVal.statusCode || 403 }
+        );
+      }
+    } else if (matchedApiKey) {
+      const keyVal = KeyManager.validate(req, body, matchedApiKey);
+      if (!keyVal.valid) {
+        return Response.json(
+          {
+            error: {
+              message: keyVal.error,
+              type: "permission_error",
+              code: keyVal.statusCode === 429 ? "quota_exceeded" : "unauthorized",
+            },
+          },
+          { status: keyVal.statusCode || 403 }
+        );
       }
     }
 
@@ -53,6 +95,30 @@ export class EdgeRouter {
     const rewriteRes = RewriteEngine.rewrite(body.model, rules);
     const requestedModel = rewriteRes.targetModel;
     body.model = requestedModel;
+
+    // Security check: if key has allowedModels, make sure rewritten model is ALSO permitted!
+    if (matchedApiKey && matchedApiKey.allowedModels && matchedApiKey.allowedModels.length > 0) {
+      const isAllowedPostRewrite = matchedApiKey.allowedModels.some((pattern) => {
+        try {
+          const regex = RewriteEngine.compilePattern(pattern.trim());
+          return regex.test(requestedModel);
+        } catch {
+          return pattern.trim() === requestedModel;
+        }
+      });
+      if (!isAllowedPostRewrite) {
+        return Response.json(
+          {
+            error: {
+              message: `Target model '${requestedModel}' after rewrite is not authorized for this API key`,
+              type: "permission_error",
+              code: "unauthorized",
+            },
+          },
+          { status: 403 }
+        );
+      }
+    }
 
     const isStream = Boolean(body.stream);
     const startMs = Date.now();
@@ -123,7 +189,7 @@ export class EdgeRouter {
         }
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), target.timeoutMs || 60000);
+        const timeout = setTimeout(() => controller.abort(), target.timeoutMs || 180000);
 
         const upstreamRes = await fetch(upstreamUrl, {
           method: "POST",
