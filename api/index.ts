@@ -644,6 +644,37 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ success: true, key: record }, { headers: { "Access-Control-Allow-Origin": "*" } });
   }
 
+  if (path.startsWith("/api/keys/") && request.method === "PUT") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const id = decodeURIComponent(path.slice("/api/keys/".length));
+    const existing = await storage.getKey(id);
+    if (!existing) {
+      return Response.json({ error: `Key '${id}' not found` }, { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const body = (await request.json()) as Partial<ApiKeyRecord>;
+    const updated: ApiKeyRecord = {
+      ...existing,
+      name: body.name !== undefined ? body.name : existing.name,
+      expiresAt: body.expiresAt !== undefined ? (body.expiresAt === null ? undefined : body.expiresAt) : existing.expiresAt,
+      maxRequests: body.maxRequests !== undefined ? (body.maxRequests === null ? undefined : body.maxRequests) : existing.maxRequests,
+      maxTokens: body.maxTokens !== undefined ? (body.maxTokens === null ? undefined : body.maxTokens) : existing.maxTokens,
+      maxPromptTokens: body.maxPromptTokens !== undefined ? (body.maxPromptTokens === null ? undefined : body.maxPromptTokens) : existing.maxPromptTokens,
+      maxCompletionTokens: body.maxCompletionTokens !== undefined ? (body.maxCompletionTokens === null ? undefined : body.maxCompletionTokens) : existing.maxCompletionTokens,
+      usedRequests: body.usedRequests !== undefined ? body.usedRequests : existing.usedRequests,
+      usedTokens: body.usedTokens !== undefined ? body.usedTokens : existing.usedTokens,
+      usedPromptTokens: body.usedPromptTokens !== undefined ? body.usedPromptTokens : existing.usedPromptTokens,
+      usedCompletionTokens: body.usedCompletionTokens !== undefined ? body.usedCompletionTokens : existing.usedCompletionTokens,
+      allowedModels: body.allowedModels !== undefined ? body.allowedModels : existing.allowedModels,
+      requiredHeaders: body.requiredHeaders !== undefined ? body.requiredHeaders : existing.requiredHeaders,
+      requiredBodyKeywords: body.requiredBodyKeywords !== undefined ? body.requiredBodyKeywords : existing.requiredBodyKeywords,
+      enabled: body.enabled !== undefined ? body.enabled : existing.enabled,
+    };
+    await storage.saveKey(updated);
+    return Response.json({ success: true, key: updated }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
   if (path.startsWith("/api/keys/") && request.method === "DELETE") {
     if (!(await AdminAuth.verify(request))) {
       return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });

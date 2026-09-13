@@ -176,6 +176,21 @@
   let editProvStickyCount = $state(1);
   let editProvSaving = $state(false);
 
+  // Edit Consumer Key Modal State
+  let editingKey = $state<ApiKeyRecord | null>(null);
+  let editKeyName = $state("");
+  let editKeyAllowedModels = $state("");
+  let editKeyMaxReq = $state<number | undefined>(undefined);
+  let editKeyUsedReq = $state<number>(0);
+  let editKeyMaxTokens = $state<number | undefined>(undefined);
+  let editKeyUsedTokens = $state<number>(0);
+  let editKeyMaxPrompt = $state<number | undefined>(undefined);
+  let editKeyMaxComp = $state<number | undefined>(undefined);
+  let editKeyExpiryMode = $state<"keep" | "never" | "1d" | "7d" | "30d" | "custom">("keep");
+  let editKeyCustomDate = $state("");
+  let editKeyEnabled = $state(true);
+  let editKeySaving = $state(false);
+
   let provDrawerMode = $state<"single" | "bulk">("single");
   let bulkSubMode = $state<"pool" | "multi">("pool");
   let bulkTargetProvId = $state("new");
@@ -889,6 +904,86 @@
     newKeyBodyKw = "";
     newKeyModels = "";
     await refreshData(true);
+  }
+
+  function handleOpenEditKey(k: ApiKeyRecord) {
+    editingKey = k;
+    editKeyName = k.name || "";
+    editKeyAllowedModels = (k.allowedModels || []).join(", ");
+    editKeyMaxReq = k.maxRequests;
+    editKeyUsedReq = k.usedRequests || 0;
+    editKeyMaxTokens = k.maxTokens;
+    editKeyUsedTokens = k.usedTokens || 0;
+    editKeyMaxPrompt = k.maxPromptTokens;
+    editKeyMaxComp = k.maxCompletionTokens;
+    editKeyExpiryMode = "keep";
+    if (k.expiresAt) {
+      const d = new Date(k.expiresAt);
+      editKeyCustomDate = d.toISOString().slice(0, 16);
+    } else {
+      editKeyCustomDate = "";
+    }
+    editKeyEnabled = k.enabled ?? true;
+  }
+
+  function handleCloseEditKey() {
+    editingKey = null;
+  }
+
+  async function handleSaveEditKey() {
+    if (!editingKey || !editKeyName) return;
+    editKeySaving = true;
+
+    let expiresAt: number | null | undefined = undefined;
+    const now = Date.now();
+    if (editKeyExpiryMode === "never") {
+      expiresAt = null;
+    } else if (editKeyExpiryMode === "1d") {
+      expiresAt = now + 86400 * 1000;
+    } else if (editKeyExpiryMode === "7d") {
+      expiresAt = now + 7 * 86400 * 1000;
+    } else if (editKeyExpiryMode === "30d") {
+      expiresAt = now + 30 * 86400 * 1000;
+    } else if (editKeyExpiryMode === "custom" && editKeyCustomDate) {
+      expiresAt = new Date(editKeyCustomDate).getTime();
+    }
+
+    const modelsArr = editKeyAllowedModels
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    try {
+      const res = await fetch(`/api/keys/${encodeURIComponent(editingKey.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          name: editKeyName.trim(),
+          allowedModels: modelsArr.length > 0 ? modelsArr : undefined,
+          maxRequests: editKeyMaxReq ? Number(editKeyMaxReq) : null,
+          usedRequests: Number(editKeyUsedReq) || 0,
+          maxTokens: editKeyMaxTokens ? Number(editKeyMaxTokens) : null,
+          usedTokens: Number(editKeyUsedTokens) || 0,
+          maxPromptTokens: editKeyMaxPrompt ? Number(editKeyMaxPrompt) : null,
+          maxCompletionTokens: editKeyMaxComp ? Number(editKeyMaxComp) : null,
+          expiresAt: expiresAt === undefined ? undefined : expiresAt,
+          enabled: editKeyEnabled,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Failed to update key: ${err.error || res.statusText}`);
+        return;
+      }
+
+      editingKey = null;
+      await refreshData(true);
+    } catch (e: any) {
+      alert(`Error updating key: ${e.message}`);
+    } finally {
+      editKeySaving = false;
+    }
   }
 
   async function handleDeleteKey(id: string) {
@@ -1646,7 +1741,10 @@
                         <span class="item-name">{k.name}</span>
                         <code class="item-slug">{k.key.slice(0, 12)}...{k.key.slice(-4)}</code>
                       </div>
-                      <button class="btn-danger" onclick={() => handleDeleteKey(k.id)}>Revoke</button>
+                      <div class="card-actions">
+                        <button class="btn-subtle" onclick={() => handleOpenEditKey(k)}>Edit</button>
+                        <button class="btn-danger" onclick={() => handleDeleteKey(k.id)}>Revoke</button>
+                      </div>
                     </div>
 
                     <div class="detail-row">
@@ -2075,6 +2173,118 @@
                 <button class="btn-subtle" onclick={handleCloseEditProvider}>Cancel</button>
                 <button class="btn-brand" disabled={editProvSaving || !editProvName || !editProvUrl} onclick={handleSaveEditProvider}>
                   {editProvSaving ? "Saving..." : "Save Provider"}
+                </button>
+              </div>
+            </div>
+          </div>
+        {/if}
+
+        {#if editingKey}
+          <div class="modal-backdrop" onclick={handleCloseEditKey} role="presentation">
+            <div class="modal-card" onclick={(e) => e.stopPropagation()} role="presentation" style="max-width: 620px;">
+              <div class="modal-header">
+                <div class="modal-title">Edit Consumer Key · <code>{editingKey.key.slice(0, 10)}...{editingKey.key.slice(-4)}</code></div>
+                <button class="modal-close" onclick={handleCloseEditKey} title="Close">✕</button>
+              </div>
+
+              <div class="modal-body">
+                <div class="form-row">
+                  <div class="field" style="flex: 2;">
+                    <label for="edit-k-name">Key Name / Label</label>
+                    <input id="edit-k-name" bind:value={editKeyName} placeholder="e.g. Production Mobile App" />
+                  </div>
+                  <div class="field" style="flex: 1;">
+                    <label for="edit-k-status">Status</label>
+                    <select id="edit-k-status" bind:value={editKeyEnabled}>
+                      <option value={true}>Active</option>
+                      <option value={false}>Disabled</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <div class="label-row">
+                    <label for="edit-k-models">Allowed Models / Combos</label>
+                    <span class="keys-detected-tag">Wildcards supported (e.g. *kimi*, gemini-*)</span>
+                  </div>
+                  <textarea
+                    id="edit-k-models"
+                    rows="2"
+                    class="bulk-textarea"
+                    bind:value={editKeyAllowedModels}
+                    placeholder="kimi-latest, *gemini*, deepseek-*"
+                  ></textarea>
+                  <span class="field-hint">Separate with commas. Leave blank to authorize all models.</span>
+                </div>
+
+                <div class="form-row" style="margin-top: 6px;">
+                  <div class="field" style="flex: 1;">
+                    <div class="label-row">
+                      <label for="edit-k-used-tokens">Used Tokens</label>
+                      <button type="button" class="mini-tag-btn" onclick={() => editKeyUsedTokens = 0}>Reset (0)</button>
+                    </div>
+                    <input id="edit-k-used-tokens" type="number" min="0" bind:value={editKeyUsedTokens} />
+                  </div>
+
+                  <div class="field" style="flex: 1;">
+                    <div class="label-row">
+                      <label for="edit-k-max-tokens">Max Tokens Limit</label>
+                      <span class="keys-detected-tag">Blank = Unlimited</span>
+                    </div>
+                    <input id="edit-k-max-tokens" type="number" min="0" bind:value={editKeyMaxTokens} placeholder="Unlimited" />
+                    <div class="token-presets" style="margin-top: 4px; display: flex; gap: 4px;">
+                      <button type="button" class="mini-tag-btn" onclick={() => editKeyMaxTokens = 1000000}>1M</button>
+                      <button type="button" class="mini-tag-btn" onclick={() => editKeyMaxTokens = 5000000}>5M</button>
+                      <button type="button" class="mini-tag-btn" onclick={() => editKeyMaxTokens = 20000000}>20M</button>
+                      <button type="button" class="mini-tag-btn" onclick={() => editKeyMaxTokens = undefined}>∞</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-row" style="margin-top: 6px;">
+                  <div class="field" style="flex: 1;">
+                    <div class="label-row">
+                      <label for="edit-k-used-req">Used Requests</label>
+                      <button type="button" class="mini-tag-btn" onclick={() => editKeyUsedReq = 0}>Reset (0)</button>
+                    </div>
+                    <input id="edit-k-used-req" type="number" min="0" bind:value={editKeyUsedReq} />
+                  </div>
+
+                  <div class="field" style="flex: 1;">
+                    <div class="label-row">
+                      <label for="edit-k-max-req">Max Requests Limit</label>
+                      <span class="keys-detected-tag">Blank = Unlimited</span>
+                    </div>
+                    <input id="edit-k-max-req" type="number" min="0" bind:value={editKeyMaxReq} placeholder="Unlimited" />
+                  </div>
+                </div>
+
+                <div class="form-row" style="margin-top: 6px;">
+                  <div class="field" style="flex: 1;">
+                    <label for="edit-k-expiry-mode">Expiration Setting</label>
+                    <select id="edit-k-expiry-mode" bind:value={editKeyExpiryMode}>
+                      <option value="keep">Keep Current ({editingKey.expiresAt ? new Date(editingKey.expiresAt).toLocaleDateString('en-GB') : 'Never'})</option>
+                      <option value="never">Never Expires (Permanent)</option>
+                      <option value="1d">+1 Day from now</option>
+                      <option value="7d">+7 Days from now</option>
+                      <option value="30d">+30 Days from now</option>
+                      <option value="custom">Custom Date & Time</option>
+                    </select>
+                  </div>
+
+                  {#if editKeyExpiryMode === 'custom'}
+                    <div class="field" style="flex: 1;">
+                      <label for="edit-k-custom-date">Custom Expiry Date</label>
+                      <input id="edit-k-custom-date" type="datetime-local" bind:value={editKeyCustomDate} />
+                    </div>
+                  {/if}
+                </div>
+              </div>
+
+              <div class="modal-footer">
+                <button class="btn-subtle" onclick={handleCloseEditKey}>Cancel</button>
+                <button class="btn-brand" disabled={editKeySaving || !editKeyName} onclick={handleSaveEditKey}>
+                  {editKeySaving ? "Saving..." : "Save Key"}
                 </button>
               </div>
             </div>

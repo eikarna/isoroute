@@ -124,4 +124,47 @@ describe("KeyManager Billing & Guard Policies", () => {
     const passRes = KeyManager.validate(dummyReq, { ...dummyBody, model: "gemini-3-flash" }, guardedKey);
     expect(passRes.valid).toBe(true);
   });
+
+  it("updates consumer key and resets used tokens/requests in storage", async () => {
+    const { SqliteStorageAdapter } = await import("../src/storage/sqlite");
+    const storage = new SqliteStorageAdapter(":memory:");
+    await storage.init();
+
+    const initialKey: ApiKeyRecord = {
+      ...baseKey,
+      id: "test_update_key",
+      key: "er-test-update-12345",
+      usedRequests: 50,
+      usedTokens: 100000,
+      maxRequests: 100,
+      maxTokens: 500000,
+      allowedModels: ["kimi-latest"],
+    };
+    await storage.saveKey(initialKey);
+
+    const saved = await storage.getKey("test_update_key");
+    expect(saved?.usedRequests).toBe(50);
+    expect(saved?.usedTokens).toBe(100000);
+    expect(saved?.allowedModels).toEqual(["kimi-latest"]);
+
+    // Update key: reset used tokens and requests, update allowed models and quotas
+    const updatedKey: ApiKeyRecord = {
+      ...saved!,
+      name: "VIP Key Updated",
+      usedRequests: 0,
+      usedTokens: 0,
+      maxTokens: 2000000,
+      allowedModels: ["kimi-latest", "gemini-flash-latest"],
+      expiresAt: Date.now() + 86400000,
+    };
+    await storage.saveKey(updatedKey);
+
+    const retrieved = await storage.getKey("test_update_key");
+    expect(retrieved?.name).toBe("VIP Key Updated");
+    expect(retrieved?.usedRequests).toBe(0);
+    expect(retrieved?.usedTokens).toBe(0);
+    expect(retrieved?.maxTokens).toBe(2000000);
+    expect(retrieved?.allowedModels).toEqual(["kimi-latest", "gemini-flash-latest"]);
+    expect(retrieved?.expiresAt).toBeGreaterThan(Date.now());
+  });
 });
