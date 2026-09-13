@@ -12,9 +12,10 @@ export interface KeyStatus {
 export class KeyPoolManager {
   private static poolState = new Map<string, KeyStatus>();
   private static rrIndexes = new Map<string, number>();
+  private static rrUsageCounts = new Map<string, number>();
 
   /**
-   * Extract all keys from a provider (comma-separated or single)
+   * Extract all keys from a provider (comma-separated or newline-separated)
    */
   static extractKeys(provider: Provider): string[] {
     if (!provider.apiKey) return [];
@@ -25,7 +26,9 @@ export class KeyPoolManager {
   }
 
   /**
-   * Select next healthy key via Round-Robin with Circuit-Breaker awareness
+   * Select next healthy key via configured strategy:
+   * - "fallback": always uses the primary (first) healthy key until it hits error/cooldown.
+   * - "round-robin": rotates keys every `stickyCount` requests.
    */
   static selectKey(provider: Provider): string | undefined {
     const keys = this.extractKeys(provider);
@@ -42,15 +45,36 @@ export class KeyPoolManager {
       }
     }
 
-    // If all keys are in cooldown, pick the one that expires soonest
+    // If all keys are in cooldown, pick the full pool as last resort
     const candidatePool = healthyKeys.length > 0 ? healthyKeys : keys;
+    const strategy = provider.keyStrategy || "fallback";
+    const stickyCount = Math.max(1, provider.stickyCount || 1);
 
-    // Round-robin selection
-    const currentIndex = this.rrIndexes.get(provider.id) ?? 0;
-    const nextIndex = (currentIndex + 1) % candidatePool.length;
-    this.rrIndexes.set(provider.id, nextIndex);
+    if (strategy === "fallback") {
+      const selected = candidatePool[0];
+      const status = this.getOrCreateStatus(selected);
+      status.lastUsed = now;
+      return selected;
+    }
 
-    const selected = candidatePool[nextIndex];
+    // Round-robin with stickyCount
+    let currentIndex = this.rrIndexes.get(provider.id) ?? 0;
+    let currentUsage = this.rrUsageCounts.get(provider.id) ?? 0;
+
+    if (currentIndex >= candidatePool.length) {
+      currentIndex = 0;
+      currentUsage = 0;
+    }
+
+    if (currentUsage >= stickyCount) {
+      currentIndex = (currentIndex + 1) % candidatePool.length;
+      currentUsage = 0;
+    }
+
+    this.rrIndexes.set(provider.id, currentIndex);
+    this.rrUsageCounts.set(provider.id, currentUsage + 1);
+
+    const selected = candidatePool[currentIndex];
     const status = this.getOrCreateStatus(selected);
     status.lastUsed = now;
 
@@ -58,12 +82,18 @@ export class KeyPoolManager {
   }
 
   /**
-   * Trip the circuit breaker for this key (e.g. on HTTP 429 or 503)
+   * Trip the circuit breaker for this key (e.g. on HTTP 401, 403, 429, 503)
    */
   static markCooldown(key: string, cooldownDurationMs = 180000): void {
     const status = this.getOrCreateStatus(key);
     status.failureCount += 1;
     status.cooldownUntil = Date.now() + cooldownDurationMs;
+
+    // Reset sticky counter so any provider using round-robin rotates immediately away from this key
+    for (const providerId of this.rrIndexes.keys()) {
+      this.rrUsageCounts.set(providerId, 999999);
+    }
+
     console.warn(`[CircuitBreaker] Key '...${key.slice(-4)}' locked for ${Math.round(cooldownDurationMs / 1000)}s`);
   }
 
@@ -74,6 +104,12 @@ export class KeyPoolManager {
     const status = this.getOrCreateStatus(key);
     status.successCount += 1;
     status.failureCount = Math.max(0, status.failureCount - 1);
+  }
+
+  static reset(): void {
+    this.poolState.clear();
+    this.rrIndexes.clear();
+    this.rrUsageCounts.clear();
   }
 
   private static getOrCreateStatus(key: string): KeyStatus {

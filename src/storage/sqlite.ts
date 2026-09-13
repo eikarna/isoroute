@@ -26,9 +26,17 @@ export class SqliteStorageAdapter implements StorageAdapter {
         type TEXT NOT NULL DEFAULT 'openai',
         headers_json TEXT,
         oauth_json TEXT,
-        enabled INTEGER NOT NULL DEFAULT 1
+        enabled INTEGER NOT NULL DEFAULT 1,
+        key_strategy TEXT DEFAULT 'fallback',
+        sticky_count INTEGER DEFAULT 1
       );
     `);
+    try {
+      this.db.run("ALTER TABLE providers ADD COLUMN key_strategy TEXT DEFAULT 'fallback'");
+    } catch {}
+    try {
+      this.db.run("ALTER TABLE providers ADD COLUMN sticky_count INTEGER DEFAULT 1");
+    } catch {}
 
     this.db.run(`
       CREATE TABLE IF NOT EXISTS combos (
@@ -116,6 +124,8 @@ export class SqliteStorageAdapter implements StorageAdapter {
       headers: r.headers_json ? JSON.parse(r.headers_json) : undefined,
       oauth: r.oauth_json ? JSON.parse(r.oauth_json) : undefined,
       enabled: Boolean(r.enabled),
+      keyStrategy: (r.key_strategy as any) || "fallback",
+      stickyCount: r.sticky_count ? Number(r.sticky_count) : 1,
     }));
   }
 
@@ -132,13 +142,15 @@ export class SqliteStorageAdapter implements StorageAdapter {
       headers: r.headers_json ? JSON.parse(r.headers_json) : undefined,
       oauth: r.oauth_json ? JSON.parse(r.oauth_json) : undefined,
       enabled: Boolean(r.enabled),
+      keyStrategy: (r.key_strategy as any) || "fallback",
+      stickyCount: r.sticky_count ? Number(r.sticky_count) : 1,
     };
   }
 
   async saveProvider(p: Provider): Promise<void> {
     const stmt = this.db.prepare(`
-      INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+      INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled, key_strategy, sticky_count)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         base_url = excluded.base_url,
@@ -146,7 +158,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
         type = excluded.type,
         headers_json = excluded.headers_json,
         oauth_json = excluded.oauth_json,
-        enabled = excluded.enabled;
+        enabled = excluded.enabled,
+        key_strategy = excluded.key_strategy,
+        sticky_count = excluded.sticky_count;
     `);
     stmt.run(
       p.id,
@@ -156,7 +170,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
       p.type || "openai",
       p.headers ? JSON.stringify(p.headers) : null,
       p.oauth ? JSON.stringify(p.oauth) : null,
-      p.enabled ? 1 : 0
+      p.enabled ? 1 : 0,
+      p.keyStrategy || "fallback",
+      p.stickyCount || 1
     );
   }
 
@@ -465,8 +481,8 @@ export class SqliteStorageAdapter implements StorageAdapter {
   async saveProvidersBatch(providers: Provider[]): Promise<number> {
     if (providers.length === 0) return 0;
     const stmt = this.db.prepare(`
-      INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+      INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled, key_strategy, sticky_count)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         base_url = excluded.base_url,
@@ -474,7 +490,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
         type = excluded.type,
         headers_json = excluded.headers_json,
         oauth_json = excluded.oauth_json,
-        enabled = excluded.enabled;
+        enabled = excluded.enabled,
+        key_strategy = excluded.key_strategy,
+        sticky_count = excluded.sticky_count;
     `);
 
     const runTx = this.db.transaction((items: Provider[]) => {
@@ -487,7 +505,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
           p.type || "openai",
           p.headers ? JSON.stringify(p.headers) : null,
           p.oauth ? JSON.stringify(p.oauth) : null,
-          p.enabled ? 1 : 0
+          p.enabled ? 1 : 0,
+          p.keyStrategy || "fallback",
+          p.stickyCount || 1
         );
       }
     });

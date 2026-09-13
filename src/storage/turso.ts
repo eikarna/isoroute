@@ -116,7 +116,9 @@ export class TursoStorageAdapter implements StorageAdapter {
         type TEXT NOT NULL,
         headers_json TEXT,
         oauth_json TEXT,
-        enabled INTEGER DEFAULT 1
+        enabled INTEGER DEFAULT 1,
+        key_strategy TEXT DEFAULT 'fallback',
+        sticky_count INTEGER DEFAULT 1
       );`,
       `CREATE TABLE IF NOT EXISTS combos (
         id TEXT PRIMARY KEY,
@@ -186,6 +188,8 @@ export class TursoStorageAdapter implements StorageAdapter {
       headers: r.headers_json ? JSON.parse(r.headers_json) : undefined,
       oauth: r.oauth_json ? JSON.parse(r.oauth_json) : undefined,
       enabled: Boolean(r.enabled),
+      keyStrategy: (r.key_strategy as any) || "fallback",
+      stickyCount: r.sticky_count ? Number(r.sticky_count) : 1,
     }));
   }
 
@@ -202,13 +206,15 @@ export class TursoStorageAdapter implements StorageAdapter {
       headers: r.headers_json ? JSON.parse(r.headers_json) : undefined,
       oauth: r.oauth_json ? JSON.parse(r.oauth_json) : undefined,
       enabled: Boolean(r.enabled),
+      keyStrategy: (r.key_strategy as any) || "fallback",
+      stickyCount: r.sticky_count ? Number(r.sticky_count) : 1,
     };
   }
 
   async saveProvider(p: Provider): Promise<void> {
     await this.execute(
-      `INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled, key_strategy, sticky_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          base_url = excluded.base_url,
@@ -216,7 +222,9 @@ export class TursoStorageAdapter implements StorageAdapter {
          type = excluded.type,
          headers_json = excluded.headers_json,
          oauth_json = excluded.oauth_json,
-         enabled = excluded.enabled;`,
+         enabled = excluded.enabled,
+         key_strategy = excluded.key_strategy,
+         sticky_count = excluded.sticky_count;`,
       [
         p.id,
         p.name,
@@ -226,6 +234,8 @@ export class TursoStorageAdapter implements StorageAdapter {
         p.headers ? JSON.stringify(p.headers) : null,
         p.oauth ? JSON.stringify(p.oauth) : null,
         p.enabled ? 1 : 0,
+        p.keyStrategy || "fallback",
+        p.stickyCount || 1,
       ]
     );
   }
@@ -539,8 +549,8 @@ export class TursoStorageAdapter implements StorageAdapter {
       const requests = chunk.map((p) => ({
         type: "execute",
         stmt: {
-          sql: `INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          sql: `INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled, key_strategy, sticky_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   name = excluded.name,
                   base_url = excluded.base_url,
@@ -548,7 +558,9 @@ export class TursoStorageAdapter implements StorageAdapter {
                   type = excluded.type,
                   headers_json = excluded.headers_json,
                   oauth_json = excluded.oauth_json,
-                  enabled = excluded.enabled;`,
+                  enabled = excluded.enabled,
+                  key_strategy = excluded.key_strategy,
+                  sticky_count = excluded.sticky_count;`,
           args: [
             { type: "text", value: p.id },
             { type: "text", value: p.name },
@@ -558,6 +570,8 @@ export class TursoStorageAdapter implements StorageAdapter {
             p.headers ? { type: "text", value: JSON.stringify(p.headers) } : { type: "null" },
             p.oauth ? { type: "text", value: JSON.stringify(p.oauth) } : { type: "null" },
             { type: "integer", value: p.enabled ? 1 : 0 },
+            { type: "text", value: p.keyStrategy || "fallback" },
+            { type: "integer", value: p.stickyCount || 1 },
           ],
         },
       }));

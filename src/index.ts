@@ -524,11 +524,31 @@ export async function handleRequest(request: Request): Promise<Response> {
     return Response.json({ providers, total: providers.length }, { headers: { "Access-Control-Allow-Origin": "*" } });
   }
 
-  if (path === "/api/providers" && request.method === "POST") {
+  if ((path === "/api/providers" && request.method === "POST") || (path.startsWith("/api/providers/") && !path.endsWith("/models") && request.method === "PUT")) {
     if (!(await AdminAuth.verify(request))) {
       return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
     }
-    const provider = (await request.json()) as Provider;
+    const body = (await request.json()) as Partial<Provider>;
+    let id = body.id;
+    if (path.startsWith("/api/providers/")) {
+      id = decodeURIComponent(path.slice("/api/providers/".length));
+    }
+    if (!id) {
+      return Response.json({ error: "Provider ID required" }, { status: 400, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const existing = await storage.getProvider(id);
+    const provider: Provider = {
+      id: id.trim().toLowerCase(),
+      name: body.name ?? existing?.name ?? id,
+      baseUrl: body.baseUrl ?? existing?.baseUrl ?? "",
+      apiKey: body.apiKey !== undefined ? body.apiKey : existing?.apiKey,
+      type: body.type ?? existing?.type ?? "openai",
+      headers: body.headers ?? existing?.headers,
+      oauth: body.oauth ?? existing?.oauth,
+      enabled: body.enabled !== undefined ? body.enabled : (existing?.enabled ?? true),
+      keyStrategy: body.keyStrategy ?? existing?.keyStrategy ?? "fallback",
+      stickyCount: body.stickyCount ? Math.max(1, Number(body.stickyCount)) : (existing?.stickyCount ?? 1),
+    };
     await storage.saveProvider(provider);
     return Response.json({ success: true, provider }, { headers: { "Access-Control-Allow-Origin": "*" } });
   }

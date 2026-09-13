@@ -11,6 +11,8 @@ export interface ProviderOAuth {
   rawSessionJson?: string;
 }
 
+export type ProviderKeyStrategy = "fallback" | "round-robin";
+
 export interface Provider {
   id: string;
   name: string;
@@ -20,6 +22,8 @@ export interface Provider {
   headers?: Record<string, string>;
   oauth?: ProviderOAuth;
   enabled: boolean;
+  keyStrategy?: ProviderKeyStrategy;
+  stickyCount?: number;
 }
 
 export type ComboStrategy = "fallback" | "round-robin" | "latency-first" | "ttft-first";

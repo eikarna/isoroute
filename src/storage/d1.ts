@@ -42,6 +42,8 @@ export class D1StorageAdapter implements StorageAdapter {
       headers: r.headers_json ? JSON.parse(r.headers_json) : undefined,
       oauth: r.oauth_json ? JSON.parse(r.oauth_json) : undefined,
       enabled: Boolean(r.enabled),
+      keyStrategy: (r.key_strategy as any) || "fallback",
+      stickyCount: r.sticky_count ? Number(r.sticky_count) : 1,
     }));
   }
 
@@ -57,13 +59,15 @@ export class D1StorageAdapter implements StorageAdapter {
       headers: r.headers_json ? JSON.parse(r.headers_json) : undefined,
       oauth: r.oauth_json ? JSON.parse(r.oauth_json) : undefined,
       enabled: Boolean(r.enabled),
+      keyStrategy: (r.key_strategy as any) || "fallback",
+      stickyCount: r.sticky_count ? Number(r.sticky_count) : 1,
     };
   }
 
   async saveProvider(p: Provider): Promise<void> {
     await this.db.prepare(`
-      INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+      INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled, key_strategy, sticky_count)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         base_url = excluded.base_url,
@@ -71,7 +75,9 @@ export class D1StorageAdapter implements StorageAdapter {
         type = excluded.type,
         headers_json = excluded.headers_json,
         oauth_json = excluded.oauth_json,
-        enabled = excluded.enabled;
+        enabled = excluded.enabled,
+        key_strategy = excluded.key_strategy,
+        sticky_count = excluded.sticky_count;
     `).bind(
       p.id,
       p.name,
@@ -80,7 +86,9 @@ export class D1StorageAdapter implements StorageAdapter {
       p.type || "openai",
       p.headers ? JSON.stringify(p.headers) : null,
       p.oauth ? JSON.stringify(p.oauth) : null,
-      p.enabled ? 1 : 0
+      p.enabled ? 1 : 0,
+      p.keyStrategy || "fallback",
+      p.stickyCount || 1
     ).run();
   }
 
@@ -375,8 +383,8 @@ export class D1StorageAdapter implements StorageAdapter {
       const chunk = providers.slice(i, i + chunkSize);
       const stmts = chunk.map((p) =>
         this.db.prepare(`
-          INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled)
-          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+          INSERT INTO providers (id, name, base_url, api_key, type, headers_json, oauth_json, enabled, key_strategy, sticky_count)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
           ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             base_url = excluded.base_url,
@@ -384,7 +392,9 @@ export class D1StorageAdapter implements StorageAdapter {
             type = excluded.type,
             headers_json = excluded.headers_json,
             oauth_json = excluded.oauth_json,
-            enabled = excluded.enabled;
+            enabled = excluded.enabled,
+            key_strategy = excluded.key_strategy,
+            sticky_count = excluded.sticky_count;
         `).bind(
           p.id,
           p.name,
@@ -393,7 +403,9 @@ export class D1StorageAdapter implements StorageAdapter {
           p.type || "openai",
           p.headers ? JSON.stringify(p.headers) : null,
           p.oauth ? JSON.stringify(p.oauth) : null,
-          p.enabled ? 1 : 0
+          p.enabled ? 1 : 0,
+          p.keyStrategy || "fallback",
+          p.stickyCount || 1
         )
       );
       await this.db.batch(stmts);

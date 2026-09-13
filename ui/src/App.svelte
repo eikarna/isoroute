@@ -163,6 +163,18 @@
   let newProvUrl = $state("");
   let newProvKey = $state("");
   let newProvType = $state<"openai" | "gemini" | "anthropic">("openai");
+  let newProvKeyStrategy = $state<"fallback" | "round-robin">("fallback");
+  let newProvStickyCount = $state(1);
+
+  // Edit Provider Modal State
+  let editingProvider = $state<Provider | null>(null);
+  let editProvName = $state("");
+  let editProvUrl = $state("");
+  let editProvType = $state<"openai" | "gemini" | "anthropic">("openai");
+  let editProvKey = $state("");
+  let editProvKeyStrategy = $state<"fallback" | "round-robin">("fallback");
+  let editProvStickyCount = $state(1);
+  let editProvSaving = $state(false);
 
   let provDrawerMode = $state<"single" | "bulk">("single");
   let bulkSubMode = $state<"pool" | "multi">("pool");
@@ -549,6 +561,12 @@
 
   async function handleAddProvider() {
     if (!newProvId || !newProvName || !newProvUrl) return;
+    const formattedKeys = newProvKey
+      .split(/[\n,]/)
+      .map(k => k.trim())
+      .filter(Boolean)
+      .join(",");
+
     await fetch("/api/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getAuthHeaders() },
@@ -556,16 +574,76 @@
         id: newProvId.trim().toLowerCase(),
         name: newProvName.trim(),
         baseUrl: newProvUrl.trim(),
-        apiKey: newProvKey.trim() || undefined,
+        apiKey: formattedKeys || undefined,
         type: newProvType,
         enabled: true,
+        keyStrategy: newProvKeyStrategy,
+        stickyCount: Math.max(1, Number(newProvStickyCount) || 1),
       }),
     });
     newProvId = "";
     newProvName = "";
     newProvUrl = "";
     newProvKey = "";
+    newProvKeyStrategy = "fallback";
+    newProvStickyCount = 1;
     await refreshData();
+  }
+
+  function handleOpenEditProvider(prov: Provider) {
+    editingProvider = prov;
+    editProvName = prov.name;
+    editProvUrl = prov.baseUrl;
+    editProvType = (prov.type as any) || "openai";
+    editProvKey = prov.apiKey ? prov.apiKey.split(/[\n,]/).map(k => k.trim()).filter(Boolean).join("\n") : "";
+    editProvKeyStrategy = prov.keyStrategy || "fallback";
+    editProvStickyCount = prov.stickyCount || 1;
+  }
+
+  function handleCloseEditProvider() {
+    editingProvider = null;
+  }
+
+  async function handleSaveEditProvider() {
+    if (!editingProvider || !editProvName || !editProvUrl) return;
+    editProvSaving = true;
+    try {
+      const formattedKeys = editProvKey
+        .split(/[\n,]/)
+        .map(k => k.trim())
+        .filter(Boolean)
+        .join(",");
+
+      const payload = {
+        id: editingProvider.id,
+        name: editProvName.trim(),
+        baseUrl: editProvUrl.trim(),
+        apiKey: formattedKeys || undefined,
+        type: editProvType,
+        enabled: editingProvider.enabled,
+        keyStrategy: editProvKeyStrategy,
+        stickyCount: Math.max(1, Number(editProvStickyCount) || 1),
+      };
+
+      const res = await fetch(`/api/providers/${encodeURIComponent(editingProvider.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Failed to update provider: ${err.error || res.statusText}`);
+        return;
+      }
+
+      editingProvider = null;
+      await refreshData();
+    } catch (e: any) {
+      alert(`Error updating provider: ${e.message}`);
+    } finally {
+      editProvSaving = false;
+    }
   }
 
   async function handleDeleteProvider(id: string) {
@@ -1240,12 +1318,21 @@
                         <span class="type-chip">{prov.type}</span>
                         <span class="item-name">{prov.name}</span>
                         <code class="item-slug">{prov.id}</code>
+                        <span class="strat-badge strat-{prov.keyStrategy || 'fallback'}">
+                          {prov.keyStrategy || 'fallback'}{#if prov.keyStrategy === 'round-robin' && (prov.stickyCount || 1) > 1} ({prov.stickyCount}x){/if}
+                        </span>
                       </div>
-                      <button class="btn-danger" onclick={() => handleDeleteProvider(prov.id)}>Delete</button>
+                      <div class="btn-group">
+                        <button class="btn-subtle" onclick={() => handleOpenEditProvider(prov)}>Edit</button>
+                        <button class="btn-danger" onclick={() => handleDeleteProvider(prov.id)}>Delete</button>
+                      </div>
                     </div>
                     <div class="detail-row"><span class="d-label">Base URL</span><code class="d-val">{prov.baseUrl}</code></div>
                     {#if prov.apiKey}
-                      <div class="detail-row"><span class="d-label">Keys</span><span class="d-val">{prov.apiKey.split(",").length} in pool</span></div>
+                      <div class="detail-row">
+                        <span class="d-label">Keys</span>
+                        <span class="d-val">{prov.apiKey.split(/[\n,]/).map(k=>k.trim()).filter(Boolean).length} in pool ({prov.keyStrategy || 'fallback'})</span>
+                      </div>
                     {/if}
                     {#if prov.oauth}
                       <div class="detail-row"><span class="d-label">Session</span><span class="d-val">{prov.oauth.type}</span></div>
@@ -1296,7 +1383,20 @@
                     <input id="p-url" bind:value={newProvUrl} placeholder="https://generativelanguage.googleapis.com" />
                   </div>
                   <div class="field">
-                    <label for="p-key">API keys (comma separated)</label>
+                    <label for="p-strat">Key Strategy</label>
+                    <select id="p-strat" bind:value={newProvKeyStrategy}>
+                      <option value="fallback">Fallback (Default - Primary key until error)</option>
+                      <option value="round-robin">Round-Robin (Rotate keys evenly)</option>
+                    </select>
+                  </div>
+                  {#if newProvKeyStrategy === 'round-robin'}
+                    <div class="field">
+                      <label for="p-sticky">Sticky Count (Requests per key)</label>
+                      <input id="p-sticky" type="number" min="1" max="1000" bind:value={newProvStickyCount} />
+                    </div>
+                  {/if}
+                  <div class="field">
+                    <label for="p-key">API keys (comma or newline separated)</label>
                     <input id="p-key" type="password" bind:value={newProvKey} placeholder="key-1, key-2" />
                   </div>
                   <div class="action-row">
@@ -1907,6 +2007,74 @@
                 <button class="btn-subtle" onclick={() => showImportModal = false}>Cancel</button>
                 <button class="btn-brand" disabled={importLoading || !importRawJson.trim()} onclick={handleRunImport}>
                   {importLoading ? "Importing..." : "Run Import"}
+                </button>
+              </div>
+            </div>
+          </div>
+        {/if}
+
+        {#if editingProvider}
+          <div class="modal-backdrop" onclick={handleCloseEditProvider} role="presentation">
+            <div class="modal-card" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+              <div class="modal-header">
+                <div class="modal-title">Edit Provider · <code>{editingProvider.id}</code></div>
+                <button class="modal-close" onclick={handleCloseEditProvider} aria-label="Close">✕</button>
+              </div>
+
+              <div class="modal-body">
+                <div class="field">
+                  <label for="edit-p-name">Provider Name</label>
+                  <input id="edit-p-name" bind:value={editProvName} placeholder="Display Name" />
+                </div>
+
+                <div class="field">
+                  <label for="edit-p-type">Protocol Type</label>
+                  <select id="edit-p-type" bind:value={editProvType}>
+                    <option value="openai">OpenAI compatible</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="anthropic">Anthropic Messages</option>
+                  </select>
+                </div>
+
+                <div class="field">
+                  <label for="edit-p-url">Base URL / Endpoint</label>
+                  <input id="edit-p-url" bind:value={editProvUrl} placeholder="https://api.example.com/v1" />
+                </div>
+
+                <div class="field">
+                  <label for="edit-p-strat">Key Rotation Strategy</label>
+                  <select id="edit-p-strat" bind:value={editProvKeyStrategy}>
+                    <option value="fallback">Fallback (Default - Primary key until error)</option>
+                    <option value="round-robin">Round-Robin (Rotate keys evenly)</option>
+                  </select>
+                </div>
+
+                {#if editProvKeyStrategy === 'round-robin'}
+                  <div class="field">
+                    <label for="edit-p-sticky">Sticky Count (Requests per key)</label>
+                    <input id="edit-p-sticky" type="number" min="1" max="1000" bind:value={editProvStickyCount} />
+                  </div>
+                {/if}
+
+                <div class="field">
+                  <div class="label-row">
+                    <label for="edit-p-key">API Keys ({editProvKey.split(/[\n,]/).map(k=>k.trim()).filter(Boolean).length} in pool)</label>
+                    <span class="keys-detected-tag">1 key per line or comma-separated</span>
+                  </div>
+                  <textarea
+                    id="edit-p-key"
+                    rows="6"
+                    class="bulk-textarea"
+                    bind:value={editProvKey}
+                    placeholder="sk-key1&#10;sk-key2&#10;sk-key3"
+                  ></textarea>
+                </div>
+              </div>
+
+              <div class="modal-footer">
+                <button class="btn-subtle" onclick={handleCloseEditProvider}>Cancel</button>
+                <button class="btn-brand" disabled={editProvSaving || !editProvName || !editProvUrl} onclick={handleSaveEditProvider}>
+                  {editProvSaving ? "Saving..." : "Save Provider"}
                 </button>
               </div>
             </div>
