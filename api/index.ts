@@ -505,6 +505,28 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ success: true, combo }, { headers: { "Access-Control-Allow-Origin": "*" } });
   }
 
+  if (path.startsWith("/api/combos/") && request.method === "PUT") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const id = decodeURIComponent(path.slice("/api/combos/".length));
+    const existing = await storage.getCombo(id);
+    if (!existing) {
+      return Response.json({ error: `Combo '${id}' not found` }, { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const body = (await request.json()) as Partial<ModelCombo>;
+    const updated: ModelCombo = {
+      ...existing,
+      displayName: body.displayName !== undefined ? body.displayName : existing.displayName,
+      description: body.description !== undefined ? body.description : existing.description,
+      targets: body.targets !== undefined ? body.targets : existing.targets,
+      strategy: body.strategy !== undefined ? body.strategy : existing.strategy,
+      enabled: body.enabled !== undefined ? body.enabled : existing.enabled,
+    };
+    await storage.saveCombo(updated);
+    return Response.json({ success: true, combo: updated }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
   if (path.startsWith("/api/combos/") && request.method === "DELETE") {
     if (!(await AdminAuth.verify(request))) {
       return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });

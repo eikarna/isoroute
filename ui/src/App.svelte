@@ -191,6 +191,13 @@
   let editKeyEnabled = $state(true);
   let editKeySaving = $state(false);
 
+  // Edit Combo Modal State
+  let editingCombo = $state<ModelCombo | null>(null);
+  let editComboName = $state("");
+  let editComboStrategy = $state<ComboStrategy>("fallback");
+  let editComboTargets = $state<TargetRoute[]>([]);
+  let editComboSaving = $state(false);
+
   let provDrawerMode = $state<"single" | "bulk">("single");
   let bulkSubMode = $state<"pool" | "multi">("pool");
   let bulkTargetProvId = $state("new");
@@ -572,6 +579,62 @@
     if (!confirm(`Delete combo "${id}"?`)) return;
     await fetch(`/api/combos/${encodeURIComponent(id)}`, { method: "DELETE", headers: getAuthHeaders() });
     await refreshData();
+  }
+
+  function handleOpenEditCombo(c: ModelCombo) {
+    editingCombo = c;
+    editComboName = c.displayName || c.id;
+    editComboStrategy = c.strategy || "fallback";
+    editComboTargets = JSON.parse(JSON.stringify(c.targets || []));
+  }
+
+  function handleCloseEditCombo() {
+    editingCombo = null;
+  }
+
+  function handleAddEditComboTarget() {
+    if (providers.length === 0) return;
+    editComboTargets = [
+      ...editComboTargets,
+      {
+        providerId: providers[0].id,
+        model: "",
+        priority: editComboTargets.length,
+      },
+    ];
+  }
+
+  function handleRemoveEditComboTarget(index: number) {
+    editComboTargets = editComboTargets.filter((_, i) => i !== index);
+  }
+
+  async function handleSaveEditCombo() {
+    if (!editingCombo) return;
+    editComboSaving = true;
+    try {
+      const res = await fetch(`/api/combos/${encodeURIComponent(editingCombo.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          displayName: editComboName.trim() || editingCombo.id,
+          strategy: editComboStrategy,
+          targets: editComboTargets,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Failed to update combo: ${err.error || res.statusText}`);
+        return;
+      }
+
+      editingCombo = null;
+      await refreshData();
+    } catch (e: any) {
+      alert(`Error updating combo: ${e.message}`);
+    } finally {
+      editComboSaving = false;
+    }
   }
 
   async function handleAddProvider() {
@@ -1203,7 +1266,7 @@
           {/if}
           <button class="btn-subtle mobile-action" title="Export full configuration JSON" onclick={handleExportConfig}>Export</button>
           <button class="btn-subtle mobile-action" title="Import configuration JSON (IsoRoute or 9Router)" onclick={() => { showImportModal = true; importResultMsg = ''; }}>Import</button>
-          <a href="/" class="btn-subtle mobile-action">Public</a>
+          <a href="/" class="btn-subtle desktop-only">Public</a>
           <button class="btn-subtle mobile-action" onclick={handleLogout}>Sign out</button>
         </div>
       </header>
@@ -1633,10 +1696,15 @@
                     <div class="card-head">
                       <div class="title-group">
                         <code class="item-slug accent">{combo.id}</code>
-                        <span class="item-name">{combo.displayName}</span>
+                        {#if combo.displayName && combo.displayName !== combo.id}
+                          <span class="item-name">{combo.displayName}</span>
+                        {/if}
                         <span class="strat-badge strat-{combo.strategy || 'fallback'}">{combo.strategy || 'fallback'}</span>
                       </div>
-                      <button class="btn-danger" onclick={() => handleDeleteCombo(combo.id)}>Delete</button>
+                      <div class="btn-group">
+                        <button class="btn-subtle" onclick={() => handleOpenEditCombo(combo)}>Edit</button>
+                        <button class="btn-danger" onclick={() => handleDeleteCombo(combo.id)}>Delete</button>
+                      </div>
                     </div>
                     <div class="ladder">
                       {#each combo.targets as t, i}
@@ -2285,6 +2353,68 @@
                 <button class="btn-subtle" onclick={handleCloseEditKey}>Cancel</button>
                 <button class="btn-brand" disabled={editKeySaving || !editKeyName} onclick={handleSaveEditKey}>
                   {editKeySaving ? "Saving..." : "Save Key"}
+                </button>
+              </div>
+            </div>
+          </div>
+        {/if}
+
+        {#if editingCombo}
+          <div class="modal-backdrop" onclick={handleCloseEditCombo} role="presentation">
+            <div class="modal-card" onclick={(e) => e.stopPropagation()} role="presentation" style="max-width: 660px;">
+              <div class="modal-header">
+                <div class="modal-title">Edit Combo · <code>{editingCombo.id}</code></div>
+                <button class="modal-close" onclick={handleCloseEditCombo} title="Close">✕</button>
+              </div>
+
+              <div class="modal-body">
+                <div class="form-row">
+                  <div class="field" style="flex: 2;">
+                    <label for="edit-c-name">Display Name</label>
+                    <input id="edit-c-name" bind:value={editComboName} placeholder="e.g. Coder Ladder" />
+                  </div>
+                  <div class="field" style="flex: 1;">
+                    <label for="edit-c-strat">Routing Strategy</label>
+                    <select id="edit-c-strat" bind:value={editComboStrategy}>
+                      <option value="fallback">Fallback (Priority order)</option>
+                      <option value="round-robin">Round-Robin</option>
+                      <option value="latency-first">Latency-First</option>
+                      <option value="ttft-first">TTFT-First</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="field" style="margin-top: 10px;">
+                  <div class="label-row">
+                    <label>Upstream Targets ({editComboTargets.length})</label>
+                    <button type="button" class="mini-tag-btn" onclick={handleAddEditComboTarget}>+ Add Target</button>
+                  </div>
+                  <div class="ladder" style="margin-top: 6px; padding: 10px; gap: 8px;">
+                    {#each editComboTargets as target, idx}
+                      <div style="display: flex; gap: 6px; align-items: center; width: 100%;">
+                        <span class="step-idx">{idx + 1}</span>
+                        <select style="flex: 1; padding: 4px 6px; font-size: 11px; background: var(--surface-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" bind:value={target.providerId}>
+                          {#each providers as p}
+                            <option value={p.id}>{p.name} ({p.id})</option>
+                          {/each}
+                        </select>
+                        <span class="step-arr">→</span>
+                        <input style="flex: 1.5; padding: 4px 6px; font-size: 11px; background: var(--surface-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" bind:value={target.model} placeholder="upstream model (e.g. gpt-4o)" />
+                        <input style="width: 50px; padding: 4px 6px; font-size: 11px; background: var(--surface-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" type="number" bind:value={target.priority} placeholder="prio" title="Priority (higher runs first)" />
+                        <button type="button" class="btn-danger" style="padding: 2px 7px; font-size: 10px;" onclick={() => handleRemoveEditComboTarget(idx)}>✕</button>
+                      </div>
+                    {/each}
+                    {#if editComboTargets.length === 0}
+                      <div class="empty-cell" style="padding: 6px;">No targets configured. Add at least 1 target.</div>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+
+              <div class="modal-footer">
+                <button class="btn-subtle" onclick={handleCloseEditCombo}>Cancel</button>
+                <button class="btn-brand" disabled={editComboSaving || editComboTargets.length === 0} onclick={handleSaveEditCombo}>
+                  {editComboSaving ? "Saving..." : "Save Combo"}
                 </button>
               </div>
             </div>
@@ -3112,16 +3242,19 @@
   .mobile-action { display: none; }
 
   @media (max-width: 880px) {
-    .app-layout { flex-direction: column; }
+    .app-layout { flex-direction: column; overflow-x: hidden; width: 100%; max-width: 100vw; }
     .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
     .sidebar-brand { padding: 10px 12px; }
     .sidebar-nav {
       flex-direction: row;
       gap: 4px;
-      padding: 6px 10px;
+      padding: 6px 12px;
+      padding-right: 28px;
       overflow-x: auto;
       scrollbar-width: none;
       border-top: 1px solid var(--border-subtle);
+      -webkit-overflow-scrolling: touch;
+      scroll-padding-right: 28px;
     }
     .sidebar-nav::-webkit-scrollbar { display: none; }
     .nav-item { padding: 5px 9px; font-size: 11.5px; white-space: nowrap; flex-shrink: 0; }
@@ -3130,7 +3263,7 @@
     .mobile-action { display: inline-flex; }
 
     .topbar { height: 44px; padding: 0 12px; }
-    .content-body { padding: 12px; }
+    .content-body { padding: 12px; overflow-x: hidden; width: 100%; box-sizing: border-box; }
     .metrics-row { grid-template-columns: 1fr 1fr; gap: 8px; }
     .metric-card { padding: 10px 12px; }
     .met-val { font-size: 16px; }
@@ -3141,6 +3274,7 @@
     .split-layout {
       display: flex;
       flex-direction: column;
+      width: 100%;
     }
     .playground-layout { grid-template-columns: 1fr; }
     .drawer-box {
@@ -3153,11 +3287,35 @@
       display: inline-flex !important;
     }
     .drawer-box:not(.mobile-open) {
-      padding: 8px 12px;
+      padding: 0;
+      background: transparent;
+      border: none;
+      margin-bottom: 8px;
     }
     .drawer-box:not(.mobile-open) .drawer-header-row {
       border-bottom: none;
       padding-bottom: 0;
+      width: 100%;
+    }
+    .drawer-box:not(.mobile-open) .drawer-title-group {
+      width: 100%;
+    }
+    .drawer-box:not(.mobile-open) .drawer-title {
+      display: none;
+    }
+    .drawer-box:not(.mobile-open) .subtab-group {
+      display: none;
+    }
+    .drawer-box:not(.mobile-open) .drawer-mobile-btn {
+      width: 100%;
+      justify-content: center;
+      padding: 7px 12px;
+      font-size: 11.5px;
+      font-weight: 500;
+      border: 1px dashed var(--border-highlight);
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 5px;
+      color: var(--accent);
     }
     .drawer-box:not(.mobile-open) .drawer-collapsible-body {
       display: none !important;
