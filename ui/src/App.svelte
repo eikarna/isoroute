@@ -1525,7 +1525,7 @@
                           {prov.keyStrategy || 'fallback'}{#if prov.keyStrategy === 'round-robin' && (prov.stickyCount || 1) > 1} ({prov.stickyCount}x){/if}
                         </span>
                       </div>
-                      <div class="btn-group">
+                      <div class="card-actions">
                         <button class="btn-subtle" onclick={() => handleOpenEditProvider(prov)}>Edit</button>
                         <button class="btn-danger" onclick={() => handleDeleteProvider(prov.id)}>Delete</button>
                       </div>
@@ -1746,7 +1746,7 @@
                         {/if}
                         <span class="strat-badge strat-{combo.strategy || 'fallback'}">{combo.strategy || 'fallback'}</span>
                       </div>
-                      <div class="btn-group">
+                      <div class="card-actions">
                         <button class="btn-subtle" onclick={() => handleOpenEditCombo(combo)}>Edit</button>
                         <button class="btn-danger" onclick={() => handleDeleteCombo(combo.id)}>Delete</button>
                       </div>
@@ -1757,12 +1757,12 @@
                           <span class="step-idx">{i + 1}</span>
                           <span class="step-prov">{t.providerId}</span>
                           <span class="step-arr">→</span>
-                          <code class="step-model">{t.model}</code>
+                          <span class="step-model">{t.model}</span>
                           <span class="step-prio">p{t.priority ?? 0}</span>
                         </div>
                       {/each}
                     </div>
-                    <div class="detail-row"><span class="d-label">Load</span><span class="d-val">{load === 0 ? "idle" : `${load} req / 15 min`}</span></div>
+                    <div class="detail-row inline-mobile"><span class="d-label">Load</span><span class="d-val">{load === 0 ? "idle" : `${load} req / 15 min`}</span></div>
                   </div>
                 {/each}
                 {#if combos.length === 0}
@@ -3086,13 +3086,46 @@
   .d-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); min-width: 64px; text-transform: uppercase; letter-spacing: 0.04em; }
   .d-val { font-family: var(--font-mono); color: var(--text-muted); font-size: 11px; word-break: break-all; }
 
-  .ladder { display: flex; flex-direction: column; gap: 4px; background: #0b0b0d; border: 1px solid var(--border-subtle); border-radius: 4px; padding: 7px 9px; }
-  .ladder-step { display: flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 10.5px; }
-  .step-idx { color: var(--text-dim); }
-  .step-prov { color: var(--text-muted); }
-  .step-arr { color: var(--text-dim); }
-  .step-model { color: var(--text); }
-  .step-prio { margin-left: auto; color: var(--text-dim); font-size: 9.5px; }
+  .ladder {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: #0b0b0d;
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    padding: 7px 9px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .ladder-step {
+    display: grid;
+    grid-template-columns: 14px minmax(44px, max-content) 12px 1fr auto;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    line-height: 1.4;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .step-idx { color: var(--text-dim); font-size: 9.5px; text-align: right; }
+  .step-prov {
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    white-space: nowrap;
+    border: 1px solid var(--border-subtle);
+  }
+  .step-arr { color: var(--text-dim); text-align: center; }
+  .step-model {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .step-prio { color: var(--text-dim); font-size: 9.5px; justify-self: end; }
 
   /* Drawer forms */
   .drawer-box {
