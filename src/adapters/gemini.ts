@@ -3,6 +3,7 @@ import type { ChatCompletionRequest, ChatMessage, ToolCall, ToolDefinition } fro
 
 export interface GeminiPart {
   text?: string;
+  thoughtSignature?: string;
   inlineData?: {
     mimeType: string;
     data: string;
@@ -90,6 +91,18 @@ export class GeminiAdapter {
     const contents: GeminiContent[] = [];
     const systemParts: GeminiPart[] = [];
 
+    // Map tool_call_id to function name across assistant messages so tool responses without explicit name resolve properly
+    const toolCallNameMap = new Map<string, string>();
+    for (const msg of req.messages) {
+      if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          if (tc.id && tc.function?.name) {
+            toolCallNameMap.set(tc.id, tc.function.name);
+          }
+        }
+      }
+    }
+
     for (const msg of req.messages) {
       if (msg.role === "system") {
         systemParts.push(...this.parseParts(msg.content));
@@ -109,12 +122,14 @@ export class GeminiAdapter {
           parsedResponse = { output: text };
         }
 
+        const functionName = msg.name || (msg.tool_call_id ? toolCallNameMap.get(msg.tool_call_id) : undefined) || "tool_result";
+
         contents.push({
           role: "user",
           parts: [
             {
               functionResponse: {
-                name: msg.name || msg.tool_call_id || "tool_result",
+                name: functionName,
                 response: parsedResponse,
               },
             },
@@ -131,13 +146,15 @@ export class GeminiAdapter {
         for (const tc of msg.tool_calls) {
           let parsedArgs = {};
           try {
-            parsedArgs = JSON.parse(tc.function.arguments);
+            parsedArgs = typeof tc.function.arguments === "string" ? JSON.parse(tc.function.arguments) : (tc.function.arguments || {});
           } catch {}
+          const thoughtSig = (tc as any).extra_content?.google?.thought_signature || (tc as any).thoughtSignature || "skip_thought_signature_validator";
           parts.push({
             functionCall: {
               name: tc.function.name,
               args: parsedArgs,
             },
+            thoughtSignature: thoughtSig,
           });
         }
       }
@@ -201,14 +218,19 @@ export class GeminiAdapter {
         textPart += part.text;
       }
       if (part.functionCall) {
-        toolCalls.push({
-          id: "call_" + crypto.randomUUID().slice(0, 12),
+        const thoughtSig = part.thoughtSignature || (part as any).thought_signature;
+        const tc: any = {
+          id: (part.functionCall as any).id || ("call_" + crypto.randomUUID().slice(0, 12)),
           type: "function",
           function: {
             name: part.functionCall.name,
             arguments: JSON.stringify(part.functionCall.args || {}),
           },
-        });
+        };
+        if (thoughtSig) {
+          tc.extra_content = { google: { thought_signature: thoughtSig } };
+        }
+        toolCalls.push(tc);
       }
     }
 
@@ -303,6 +325,19 @@ export class GeminiAdapter {
               }
 
               if (part.functionCall) {
+                const thoughtSig = part.thoughtSignature || (part as any).thought_signature;
+                const toolCallObj: any = {
+                  index: 0,
+                  id: (part.functionCall as any).id || ("call_" + crypto.randomUUID().slice(0, 12)),
+                  type: "function",
+                  function: {
+                    name: part.functionCall.name,
+                    arguments: JSON.stringify(part.functionCall.args || {}),
+                  },
+                };
+                if (thoughtSig) {
+                  toolCallObj.extra_content = { google: { thought_signature: thoughtSig } };
+                }
                 const toolChunk = {
                   id: completionId,
                   object: "chat.completion.chunk",
@@ -312,17 +347,7 @@ export class GeminiAdapter {
                     {
                       index: 0,
                       delta: {
-                        tool_calls: [
-                          {
-                            index: 0,
-                            id: "call_" + crypto.randomUUID().slice(0, 12),
-                            type: "function",
-                            function: {
-                              name: part.functionCall.name,
-                              arguments: JSON.stringify(part.functionCall.args || {}),
-                            },
-                          },
-                        ],
+                        tool_calls: [toolCallObj],
                       },
                       finish_reason: null,
                     },

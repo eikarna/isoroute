@@ -170,7 +170,7 @@ export class EdgeRouter {
         }
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), target.timeoutMs || 180000);
+        const timeout = setTimeout(() => controller.abort(), target.timeoutMs || 25000);
 
         const upstreamRes = await fetch(upstreamUrl, {
           method: "POST",
@@ -183,14 +183,21 @@ export class EdgeRouter {
         const latencyMs = Date.now() - startMs;
 
         // Circuit Breaker & Failover check
-        if ([401, 403, 429, 500, 502, 503, 504].includes(upstreamRes.status)) {
-          if (token && [401, 403, 429].includes(upstreamRes.status)) {
-            KeyPoolManager.markCooldown(token, 180000); // 3 minutes cooldown on bad/rate-limited keys
+        const errText = !upstreamRes.ok ? await upstreamRes.text() : "";
+        const isGeoBlocked = upstreamRes.status === 400 && (
+          errText.includes("User location") ||
+          errText.includes("FAILED_PRECONDITION") ||
+          errText.includes("location is not supported")
+        );
+        const isFailoverStatus = [401, 403, 404, 408, 429, 500, 502, 503, 504].includes(upstreamRes.status) || isGeoBlocked;
+
+        if (isFailoverStatus) {
+          if (token && [401, 403, 429, 503].includes(upstreamRes.status)) {
+            KeyPoolManager.markCooldown(token, 180000); // 3 minutes cooldown on bad/rate-limited/congested keys
           }
-          const errText = await upstreamRes.text();
           console.warn(`[Failover] Target ${target.providerId}/${target.model} returned ${upstreamRes.status} (key attempt ${keyAttempt + 1}/${maxKeyAttempts}).`);
           lastError = { status: upstreamRes.status, message: errText };
-          if (token && [401, 403, 429].includes(upstreamRes.status) && keyAttempt + 1 < maxKeyAttempts) {
+          if (token && [401, 403, 429, 503].includes(upstreamRes.status) && keyAttempt + 1 < maxKeyAttempts) {
             continue; // Try next key in same provider!
           }
           break; // Try next cascade target!
@@ -361,8 +368,7 @@ export class EdgeRouter {
         }
 
         // Other client errors (e.g. 400 Bad Request) are returned directly without failover
-        const errorText = await upstreamRes.text();
-        return new Response(errorText, {
+        return new Response(errText, {
           status: upstreamRes.status,
           headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
         });
