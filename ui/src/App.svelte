@@ -1499,20 +1499,21 @@
 
         {:else if activeTab === 'providers'}
           <div class="tab-pane">
-            <div class="view-header-bar">
-              <div class="search-bar">
-                <input
-                  type="text"
-                  class="search-input"
-                  placeholder="Search providers (id, name, url)..."
-                  bind:value={providerSearch}
-                />
-                {#if providerSearch}
-                  <button class="search-clear" onclick={() => providerSearch = ''} title="Clear">✕</button>
-                {/if}
-                <span class="search-count">{filteredProviders.length}/{providers.length}</span>
-              </div>
-              <button class="btn-create-trigger" class:active={mobileDrawerOpen['providers']} onclick={() => toggleMobileDrawer('providers')}>
+            <div class="search-bar">
+              <input
+                type="text"
+                class="search-input"
+                placeholder="Search providers (id, name, url)..."
+                bind:value={providerSearch}
+              />
+              {#if providerSearch}
+                <button class="search-clear" onclick={() => providerSearch = ''} title="Clear">✕</button>
+              {/if}
+              <span class="search-count">{filteredProviders.length}/{providers.length}</span>
+            </div>
+
+            <div class="mobile-action-bar mobile-only">
+              <button class="btn-mobile-toggle" onclick={() => toggleMobileDrawer('providers')}>
                 {mobileDrawerOpen['providers'] ? "✕ Close Form" : "+ Add Provider"}
               </button>
             </div>
@@ -1725,20 +1726,21 @@
 
         {:else if activeTab === 'combos'}
           <div class="tab-pane">
-            <div class="view-header-bar">
-              <div class="search-bar">
-                <input
-                  type="text"
-                  class="search-input"
-                  placeholder="Search combos or upstream models..."
-                  bind:value={comboSearch}
-                />
-                {#if comboSearch}
-                  <button class="search-clear" onclick={() => comboSearch = ''} title="Clear">✕</button>
-                {/if}
-                <span class="search-count">{filteredCombos.length}/{combos.length}</span>
-              </div>
-              <button class="btn-create-trigger" class:active={mobileDrawerOpen['combos']} onclick={() => toggleMobileDrawer('combos')}>
+            <div class="search-bar">
+              <input
+                type="text"
+                class="search-input"
+                placeholder="Search combos or upstream models..."
+                bind:value={comboSearch}
+              />
+              {#if comboSearch}
+                <button class="search-clear" onclick={() => comboSearch = ''} title="Clear">✕</button>
+              {/if}
+              <span class="search-count">{filteredCombos.length}/{combos.length}</span>
+            </div>
+
+            <div class="mobile-action-bar mobile-only">
+              <button class="btn-mobile-toggle" onclick={() => toggleMobileDrawer('combos')}>
                 {mobileDrawerOpen['combos'] ? "✕ Close Form" : "+ Create Combo"}
               </button>
             </div>
@@ -1834,20 +1836,21 @@
 
 {:else if activeTab === 'keys'}
   <div class="tab-pane">
-    <div class="view-header-bar">
-      <div class="search-bar">
-        <input
-          type="text"
-          class="search-input"
-          placeholder="Search keys by name or snippet..."
-          bind:value={keySearch}
-        />
-        {#if keySearch}
-          <button class="search-clear" onclick={() => keySearch = ''} title="Clear">✕</button>
-        {/if}
-        <span class="search-count">{filteredApiKeys.length}/{apiKeys.length}</span>
-      </div>
-      <button class="btn-create-trigger" class:active={mobileDrawerOpen['keys']} onclick={() => toggleMobileDrawer('keys')}>
+    <div class="search-bar">
+      <input
+        type="text"
+        class="search-input"
+        placeholder="Search keys by name or snippet..."
+        bind:value={keySearch}
+      />
+      {#if keySearch}
+        <button class="search-clear" onclick={() => keySearch = ''} title="Clear">✕</button>
+      {/if}
+      <span class="search-count">{filteredApiKeys.length}/{apiKeys.length}</span>
+    </div>
+
+    <div class="mobile-action-bar mobile-only">
+      <button class="btn-mobile-toggle" onclick={() => toggleMobileDrawer('keys')}>
         {mobileDrawerOpen['keys'] ? "✕ Close Form" : "+ Issue Key"}
       </button>
     </div>
@@ -1967,20 +1970,21 @@
 
         {:else if activeTab === 'rules'}
           <div class="tab-pane">
-            <div class="view-header-bar">
-              <div class="search-bar">
-                <input
-                  type="text"
-                  class="search-input"
-                  placeholder="Search pattern or target..."
-                  bind:value={ruleSearch}
-                />
-                {#if ruleSearch}
-                  <button class="search-clear" onclick={() => ruleSearch = ''} title="Clear">✕</button>
-                {/if}
-                <span class="search-count">{filteredRules.length}/{routeRules.length}</span>
-              </div>
-              <button class="btn-create-trigger" class:active={mobileDrawerOpen['rules']} onclick={() => toggleMobileDrawer('rules')}>
+            <div class="search-bar">
+              <input
+                type="text"
+                class="search-input"
+                placeholder="Search pattern or target..."
+                bind:value={ruleSearch}
+              />
+              {#if ruleSearch}
+                <button class="search-clear" onclick={() => ruleSearch = ''} title="Clear">✕</button>
+              {/if}
+              <span class="search-count">{filteredRules.length}/{routeRules.length}</span>
+            </div>
+
+            <div class="mobile-action-bar mobile-only">
+              <button class="btn-mobile-toggle" onclick={() => toggleMobileDrawer('rules')}>
                 {mobileDrawerOpen['rules'] ? "✕ Close Form" : "+ Add Rule"}
               </button>
             </div>
@@ -2801,8 +2805,8 @@
   }
   @keyframes sweep { from { transform: scaleX(0.3); opacity: 0.5; } to { transform: scaleX(1); opacity: 1; } }
 
-  .content-body { flex: 1; padding: 18px; overflow-y: auto; }
-  .tab-pane { display: flex; flex-direction: column; gap: 14px; max-width: 1080px; }
+  .content-body { flex: 1; padding: 18px; overflow-y: auto; width: 100%; box-sizing: border-box; }
+  .tab-pane { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 100%; box-sizing: border-box; }
 
   /* Metrics */
   .metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
@@ -3005,48 +3009,25 @@
   .feed-meta { display: flex; flex-wrap: wrap; gap: 5px; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
   /* Split layouts */
-  .split-layout { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; align-items: start; }
-  .card-list { display: flex; flex-direction: column; gap: 9px; }
-
-  /* View Toolbar & Full-Width Search Header */
-  .view-header-bar {
+  .split-layout {
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: 16px;
+    align-items: start;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .card-list {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 10px;
     width: 100%;
-    margin-bottom: 6px;
     box-sizing: border-box;
   }
-  .view-header-bar .search-bar {
-    flex: 1;
-    margin-bottom: 0;
-  }
-  .btn-create-trigger {
+
+  .mobile-action-bar {
     display: none;
-    align-items: center;
-    gap: 6px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border-highlight);
-    border-radius: 5px;
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    font-weight: 500;
-    padding: 6px 14px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 120ms ease;
-    min-height: 33px;
-    box-sizing: border-box;
-  }
-  .btn-create-trigger:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: var(--text-dim);
-  }
-  .btn-create-trigger.active {
-    background: var(--surface-elevated);
-    border-color: var(--accent);
-    color: var(--accent);
+    width: 100%;
   }
 
   /* Search bar */
@@ -3056,9 +3037,11 @@
     gap: 8px;
     background: #09090b;
     border: 1px solid var(--border);
-    border-radius: 5px;
-    padding: 6px 10px;
-    margin-bottom: 3px;
+    border-radius: 6px;
+    padding: 7px 12px;
+    margin-bottom: 4px;
+    width: 100%;
+    box-sizing: border-box;
     position: sticky;
     top: 0;
     z-index: 10;
@@ -3726,25 +3709,29 @@
       margin-left: unset;
     }
 
-    /* Top View Header Bar on Mobile */
-    .view-header-bar {
+    /* Mobile Action Bar */
+    .mobile-action-bar {
       display: flex;
-      flex-direction: row;
-      align-items: center;
-      gap: 8px;
       width: 100%;
       margin-bottom: 6px;
     }
-    .view-header-bar .search-bar {
-      flex: 1;
-      min-width: 0;
+    .btn-mobile-toggle {
       width: 100%;
+      justify-content: center;
+      padding: 8px 12px;
+      font-size: 11.5px;
+      font-family: var(--font-mono);
+      font-weight: 500;
+      border: 1px dashed var(--border-highlight);
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 5px;
+      color: var(--accent);
+      cursor: pointer;
+      box-sizing: border-box;
+      transition: background 120ms ease;
     }
-    .btn-create-trigger {
-      padding: 6px 11px;
-      font-size: 11px;
-      flex-shrink: 0;
-      min-height: 33px;
+    .btn-mobile-toggle:hover {
+      background: rgba(255, 255, 255, 0.05);
     }
 
     /* Hybrid Form Drawer on Mobile */
