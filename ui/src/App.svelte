@@ -1586,6 +1586,9 @@
                   <div class="field">
                     <label for="p-url">Base URL</label>
                     <input id="p-url" bind:value={newProvUrl} placeholder="https://generativelanguage.googleapis.com" />
+                    {#if newProvType === 'openai' && newProvUrl.includes('generativelanguage.googleapis.com') && !newProvUrl.includes('/openai')}
+                      <span class="field-hint" style="color: #f59e0b;">Tip: Google AI Studio with OpenAI protocol requires /v1beta/openai endpoint, or switch Protocol to Google Gemini.</span>
+                    {/if}
                   </div>
                   <div class="field">
                     <label for="p-strat">Key Strategy</label>
@@ -3019,7 +3022,7 @@
     margin-bottom: 0;
   }
   .btn-create-trigger {
-    display: inline-flex;
+    display: none;
     align-items: center;
     gap: 6px;
     background: rgba(255, 255, 255, 0.04);
