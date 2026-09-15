@@ -294,9 +294,23 @@ export class EdgeRouter {
             let transformedStream: ReadableStream<Uint8Array>;
 
             if (provider.type === "gemini") {
-              transformedStream = GeminiAdapter.createStreamTransformer(upstreamRes.body, requestedModel, onUsageCallback);
+              const geminiStream = GeminiAdapter.createStreamTransformer(upstreamRes.body, requestedModel, onUsageCallback);
+              transformedStream = createKeepAliveStream(geminiStream, {
+                pingIntervalMs: 15000,
+                streamStartTime: startMs,
+                onTtft: (ttftMs) => {
+                  MetricsEngine.record(target.providerId, target.model, ttftMs, ttftMs);
+                },
+              });
             } else if (provider.type === "anthropic") {
-              transformedStream = AnthropicAdapter.createStreamTransformer(upstreamRes.body, requestedModel, onUsageCallback);
+              const anthropicStream = AnthropicAdapter.createStreamTransformer(upstreamRes.body, requestedModel, onUsageCallback);
+              transformedStream = createKeepAliveStream(anthropicStream, {
+                pingIntervalMs: 15000,
+                streamStartTime: startMs,
+                onTtft: (ttftMs) => {
+                  MetricsEngine.record(target.providerId, target.model, ttftMs, ttftMs);
+                },
+              });
             } else {
               transformedStream = createKeepAliveStream(upstreamRes.body, {
                 pingIntervalMs: 15000,

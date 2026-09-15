@@ -82,6 +82,16 @@ export class AnthropicAdapter {
     const messages: AnthropicMessage[] = [];
     const systemParts: string[] = [];
 
+    // Track valid tool_call IDs to prevent orphan tool_result rejection (HTTP 400)
+    const validToolCallIds = new Set<string>();
+    for (const msg of req.messages) {
+      if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          if (tc.id) validToolCallIds.add(tc.id);
+        }
+      }
+    }
+
     for (const msg of req.messages) {
       if (msg.role === "system") {
         const text = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
@@ -91,16 +101,29 @@ export class AnthropicAdapter {
 
       if (msg.role === "tool") {
         const text = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-        messages.push({
-          role: "user",
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: msg.tool_call_id || "call_unknown",
-              content: text,
-            },
-          ],
-        });
+        const toolId = msg.tool_call_id || "call_unknown";
+
+        // If orphan tool result without matching tool_call, convert to text to avoid Anthropic 400
+        const isOrphan = validToolCallIds.size > 0 && !validToolCallIds.has(toolId);
+        const toolBlock: AnthropicContentBlock = isOrphan
+          ? { type: "text", text: `[Tool Result ${toolId}]: ${text}` }
+          : { type: "tool_result", tool_use_id: toolId, content: text };
+
+        // Multi-Tool Merge: Anthropic forbids consecutive user messages.
+        // If last message is already user, merge this tool_result block into it!
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg && lastMsg.role === "user") {
+          if (Array.isArray(lastMsg.content)) {
+            lastMsg.content.push(toolBlock);
+          } else {
+            lastMsg.content = [{ type: "text", text: String(lastMsg.content) }, toolBlock];
+          }
+        } else {
+          messages.push({
+            role: "user",
+            content: [toolBlock],
+          });
+        }
         continue;
       }
 
@@ -134,6 +157,11 @@ export class AnthropicAdapter {
       } else if (blocks.length > 0) {
         messages.push({ role, content: blocks });
       }
+    }
+
+    // Ensure first message is always 'user' as mandated by Anthropic API
+    if (messages.length > 0 && messages[0].role === "assistant") {
+      messages.unshift({ role: "user", content: "Continue" });
     }
 
     if (messages.length === 0) {
