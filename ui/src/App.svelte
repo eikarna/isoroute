@@ -3201,6 +3201,13 @@
     flex-direction: column;
     gap: 4px;
   }
+  .form-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    width: 100%;
+    box-sizing: border-box;
+  }
   .label-row {
     display: flex;
     justify-content: space-between;
@@ -3441,28 +3448,72 @@
   .mobile-action { display: none; }
 
   @media (max-width: 880px) {
-    .app-layout { flex-direction: column; overflow-x: hidden; width: 100%; max-width: 100vw; }
-    .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
-    .sidebar-brand { padding: 10px 12px; }
+    .app-layout { flex-direction: column; overflow-x: hidden; width: 100%; max-width: 100vw; box-sizing: border-box; }
+    .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); box-sizing: border-box; }
+    .sidebar-brand { padding: 10px 14px; }
     .sidebar-nav {
       flex-direction: row;
-      gap: 4px;
+      gap: 5px;
       padding: 6px 12px;
-      padding-right: 28px;
+      padding-right: 32px;
       overflow-x: auto;
       scrollbar-width: none;
       border-top: 1px solid var(--border-subtle);
       -webkit-overflow-scrolling: touch;
-      scroll-padding-right: 28px;
+      scroll-padding-right: 32px;
+      box-sizing: border-box;
     }
     .sidebar-nav::-webkit-scrollbar { display: none; }
-    .nav-item { padding: 5px 9px; font-size: 11.5px; white-space: nowrap; flex-shrink: 0; }
+    .nav-item {
+      padding: 6px 11px;
+      font-size: 12px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      min-height: 34px;
+      border-radius: 4px;
+    }
     .nav-item span:not(.pill-count) { display: inline; }
     .sidebar-footer { display: none; }
     .mobile-action { display: inline-flex; }
 
-    .topbar { height: 44px; padding: 0 12px; }
-    .content-body { padding: 12px; overflow-x: hidden; width: 100%; box-sizing: border-box; }
+    .topbar {
+      height: 46px;
+      padding: 0 12px;
+      gap: 8px;
+      box-sizing: border-box;
+    }
+    .topbar-title {
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .topbar-actions .btn-subtle {
+      padding: 4px 8px;
+      font-size: 10.5px;
+    }
+    .live-tag {
+      font-size: 9.5px;
+      gap: 4px;
+    }
+    .live-bar {
+      width: 10px;
+    }
+
+    .content-body {
+      padding: 10px 12px;
+      overflow-x: hidden;
+      width: 100%;
+      max-width: 100vw;
+      box-sizing: border-box;
+    }
     .metrics-row { grid-template-columns: 1fr 1fr; gap: 8px; }
     .metric-card { padding: 10px 12px; }
     .met-val { font-size: 16px; }
@@ -3474,12 +3525,116 @@
       display: flex;
       flex-direction: column;
       width: 100%;
+      max-width: 100%;
+      gap: 10px;
+      box-sizing: border-box;
+    }
+    .card-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
     }
     .playground-layout { grid-template-columns: 1fr; }
+
+    /* Card overhaul for mobile */
+    .item-card {
+      padding: 12px;
+      gap: 10px;
+      width: 100%;
+      box-sizing: border-box;
+      overflow-x: hidden;
+    }
+    .card-head {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      width: 100%;
+    }
+    .title-group {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .item-name {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .card-actions {
+      display: flex;
+      gap: 6px;
+      width: 100%;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .card-actions .btn-subtle,
+    .card-actions .btn-danger,
+    .card-actions button {
+      flex: 1;
+      text-align: center;
+      justify-content: center;
+      padding: 7px 10px;
+      font-size: 11px;
+      min-height: 32px;
+      box-sizing: border-box;
+    }
+
+    /* Detail Row Stacked Layout */
+    .detail-row {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 3px;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 2px 0;
+    }
+    .d-label {
+      min-width: unset;
+      font-size: 9.5px;
+      color: var(--text-dim);
+      letter-spacing: 0.05em;
+    }
+    .d-val {
+      font-size: 11.5px;
+      width: 100%;
+      word-break: break-all;
+      overflow-wrap: anywhere;
+      line-height: 1.45;
+    }
+
+    /* Form Rows on Mobile */
+    .form-row {
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+    }
+    .form-row > .field {
+      width: 100% !important;
+      flex: none !important;
+    }
+
+    /* Ladder step wrapping */
+    .ladder-step {
+      flex-wrap: wrap;
+      gap: 4px 6px;
+      font-size: 10.5px;
+    }
+    .step-prio {
+      margin-left: unset;
+    }
+
+    /* Drawer Box Mobile */
     .drawer-box {
       order: -1;
       width: 100%;
-      margin-bottom: 12px;
+      box-sizing: border-box;
+      margin-bottom: 10px;
       padding: 10px 12px;
     }
     .drawer-mobile-btn {
@@ -3489,7 +3644,7 @@
       padding: 0;
       background: transparent;
       border: none;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     .drawer-box:not(.mobile-open) .drawer-header-row {
       border-bottom: none;
@@ -3508,8 +3663,8 @@
     .drawer-box:not(.mobile-open) .drawer-mobile-btn {
       width: 100%;
       justify-content: center;
-      padding: 7px 12px;
-      font-size: 11.5px;
+      padding: 8px 12px;
+      font-size: 12px;
       font-weight: 500;
       border: 1px dashed var(--border-highlight);
       background: rgba(255, 255, 255, 0.02);
@@ -3518,6 +3673,26 @@
     }
     .drawer-box:not(.mobile-open) .drawer-collapsible-body {
       display: none !important;
+    }
+
+    .modal-backdrop {
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    .modal-card {
+      max-width: 100%;
+      max-height: 90vh;
+      box-sizing: border-box;
+    }
+    .modal-body {
+      padding: 12px;
+      gap: 10px;
+      max-height: 72vh;
+      box-sizing: border-box;
+    }
+    .modal-footer {
+      padding: 10px 12px;
+      box-sizing: border-box;
     }
 
     .route-line { grid-template-columns: 1fr; gap: 3px; }
