@@ -2299,23 +2299,80 @@
 
         {:else if activeTab === 'oauth'}
           <div class="tab-pane">
-            <div class="drawer-box wide-box">
-              <div class="drawer-title">Import CLI session</div>
-              <div class="field">
-                <label for="oa-prov">Provider</label>
-                <select id="oa-prov" bind:value={oauthProviderId}>
-                  {#each providers as prov}
-                    <option value={prov.id}>{prov.name} ({prov.id})</option>
-                  {/each}
-                </select>
+            <div class="split-layout">
+              <div class="drawer-box">
+                <div class="drawer-title">Import CLI session</div>
+                <div class="field">
+                  <label for="oa-prov">Target Provider</label>
+                  <select id="oa-prov" bind:value={oauthProviderId}>
+                    {#each providers as prov}
+                      <option value={prov.id}>{prov.name} ({prov.id})</option>
+                    {/each}
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="oa-json">Session JSON Payload</label>
+                  <textarea
+                    id="oa-json"
+                    rows="12"
+                    bind:value={oauthJson}
+                    placeholder={'{\n  "client_id": "…",\n  "client_secret": "…",\n  "refresh_token": "…",\n  "type": "authorized_user"\n}'}
+                  ></textarea>
+                </div>
+                <div class="action-row">
+                  <button class="btn-brand" onclick={handleImportOAuth}>Import Session Credentials</button>
+                  {#if oauthStatusMsg}<span class="status-inline">{oauthStatusMsg}</span>{/if}
+                </div>
               </div>
-              <div class="field">
-                <label for="oa-json">Session JSON</label>
-                <textarea id="oa-json" rows="9" bind:value={oauthJson} placeholder={'{\n  "client_id": "…",\n  "refresh_token": "…",\n  "token_uri": "https://oauth2.googleapis.com/token"\n}'}></textarea>
-              </div>
-              <div class="action-row">
-                <button class="btn-brand" onclick={handleImportOAuth}>Import</button>
-                {#if oauthStatusMsg}<span class="status-inline">{oauthStatusMsg}</span>{/if}
+
+              <div class="drawer-box">
+                <div class="drawer-title">CLI Session Formats &amp; Extraction</div>
+                
+                <div class="bulk-help-banner" style="margin-top: 2px;">
+                  Import persistent CLI credentials directly from your local terminal or IDE configs to bypass manual token rotation.
+                </div>
+
+                <div class="detail-row" style="margin-top: 10px;">
+                  <span class="d-label">Google ADC</span>
+                  <span class="d-val"><code>~/.config/gcloud/application_default_credentials.json</code></span>
+                </div>
+                <div class="detail-row">
+                  <span class="d-label">Cursor IDE</span>
+                  <span class="d-val">Session cookies / tokens (<code>WorkosCursorSessionToken</code>)</span>
+                </div>
+                <div class="detail-row">
+                  <span class="d-label">Kiro / Claude</span>
+                  <span class="d-val">OAuth refresh tokens with automatic grant rotation</span>
+                </div>
+
+                <div class="table-container" style="margin-top: 14px;">
+                  <table class="dense-table">
+                    <thead>
+                      <tr>
+                        <th>Field</th>
+                        <th>Required</th>
+                        <th>Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>refresh_token</code></td>
+                        <td><span class="type-chip s-ok">YES</span></td>
+                        <td>Long-lived OAuth token used for token refresh</td>
+                      </tr>
+                      <tr>
+                        <td><code>client_id</code></td>
+                        <td><span class="type-chip">OPTIONAL</span></td>
+                        <td>OAuth app client identifier (if custom client)</td>
+                      </tr>
+                      <tr>
+                        <td><code>token_uri</code></td>
+                        <td><span class="type-chip">OPTIONAL</span></td>
+                        <td>Token exchange endpoint (defaults to Google/provider endpoint)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
