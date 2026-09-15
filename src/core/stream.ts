@@ -7,6 +7,7 @@ export function createKeepAliveStream(
     streamStartTime?: number;
     onTtft?: (ttftMs: number) => void;
     onUsage?: (usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }) => void;
+    onDone?: () => void;
   } = {}
 ): ReadableStream<Uint8Array> {
   const pingInterval = options.pingIntervalMs ?? 15000;
@@ -60,6 +61,14 @@ export function createKeepAliveStream(
         clearInterval(timer);
         timer = null;
       }
+      options.onDone?.();
+    },
+    cancel() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      options.onDone?.();
     },
   });
 

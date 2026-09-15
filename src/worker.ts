@@ -12,6 +12,7 @@ import { KeyManager, type ApiKeyRecord } from "./core/keys";
 import { BulkIngestEngine, type BulkParseOptions } from "./core/bulk";
 import { BackupEngine } from "./core/backup";
 import { SentinelEngine } from "./core/sentinel";
+import { DEFAULT_QUOTA_SAVER_CONFIG } from "./core/quota-saver";
 import type { RouteRule } from "./core/rewrite";
 import type { ChatCompletionRequest, ModelCombo, Provider } from "./types";
 import { DASHBOARD_HTML } from "./dashboardHtml";
@@ -186,13 +187,27 @@ export default {
         });
       }
 
-      const models = combos.map((c) => ({
-        id: c.id,
-        object: "model",
-        created: 1700000000,
-        owned_by: "edge-router",
-        display_name: c.displayName,
-      }));
+      const models = combos.map((c) => {
+        const idLower = c.id.toLowerCase();
+        const isVision = idLower.includes("vision") || idLower.includes("gemini") || idLower.includes("claude") || idLower.includes("gpt-4") || idLower.includes("vl");
+        const isReasoning = idLower.includes("o1") || idLower.includes("o3") || idLower.includes("thinking") || idLower.includes("r1") || idLower.includes("gemini-2.5") || idLower.includes("gemini-3") || idLower.includes("claude-3-7");
+        const contextWindow = idLower.includes("gemini") ? 1048576 : (idLower.includes("claude") ? 200000 : 128000);
+
+        return {
+          id: c.id,
+          object: "model",
+          created: 1700000000,
+          owned_by: "isoroute",
+          display_name: c.displayName,
+          context_window: contextWindow,
+          capabilities: {
+            vision: isVision,
+            tools: !idLower.includes("embed"),
+            reasoning: isReasoning,
+            streaming: true,
+          },
+        };
+      });
 
       return Response.json(
         { object: "list", data: models },
@@ -812,6 +827,22 @@ export default {
       }
       const result = await SentinelEngine.runSentinel(storage);
       return Response.json({ success: true, ...result }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+
+    // 3.9 Quota Saver Settings API
+    if (path === "/api/quota-saver" && request.method === "GET") {
+      return Response.json(
+        {
+          config: DEFAULT_QUOTA_SAVER_CONFIG,
+          features: {
+            tool_output_truncation: true,
+            historical_image_stripping: true,
+            middle_out_compaction: true,
+            auto_recover_on_413: true,
+          },
+        },
+        { headers: { "Access-Control-Allow-Origin": "*" } }
+      );
     }
 
     // 4. Public Landing Page at root (/)

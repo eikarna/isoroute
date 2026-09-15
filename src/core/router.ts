@@ -8,6 +8,7 @@ import { GeminiAdapter } from "../adapters/gemini";
 import { AnthropicAdapter } from "../adapters/anthropic";
 import { RequestSanitizer } from "./sanitizer";
 import { RewriteEngine } from "./rewrite";
+import { QuotaSaverEngine } from "./quota-saver";
 import { KeyManager, type ApiKeyRecord } from "./keys";
 import { MetricsEngine } from "./metrics";
 import { AdminAuth } from "./auth";
@@ -70,6 +71,13 @@ export class EdgeRouter {
     const requestedModel = rewriteRes.targetModel;
     const originalModel = body.model;
     body.model = requestedModel;
+
+    // 2.5 Quota Saver Optimization (Context Compression & Tool Truncation)
+    const { optimizedReq, tokensSaved } = QuotaSaverEngine.optimize(body);
+    body = optimizedReq;
+    if (tokensSaved > 0) {
+      console.log(`[QuotaSaver] Optimized payload saved ~${tokensSaved} estimated tokens.`);
+    }
 
     if (allKeys.length > 0 && !isAdmin) {
       if (!matchedApiKey) {
@@ -147,6 +155,7 @@ export class EdgeRouter {
         // Select active healthy key from pool or OAuth JIT
         const oauthToken = await OAuthManager.getValidAccessToken(provider);
         const token = oauthToken || KeyPoolManager.selectKey(provider);
+        const releaseKey = token ? KeyPoolManager.acquireKey(token) : () => {};
 
         try {
           let upstreamUrl = "";
@@ -234,6 +243,7 @@ export class EdgeRouter {
         const isFailoverStatus = [401, 403, 404, 408, 429, 500, 502, 503, 504].includes(upstreamRes.status) || isGeoBlocked;
 
         if (isFailoverStatus) {
+          releaseKey();
           if (token && [401, 403, 429, 503].includes(upstreamRes.status)) {
             KeyPoolManager.markCooldown(token, 180000); // 3 minutes cooldown on bad/rate-limited/congested keys
           }
@@ -298,6 +308,7 @@ export class EdgeRouter {
               transformedStream = createKeepAliveStream(geminiStream, {
                 pingIntervalMs: 15000,
                 streamStartTime: startMs,
+                onDone: releaseKey,
                 onTtft: (ttftMs) => {
                   MetricsEngine.record(target.providerId, target.model, ttftMs, ttftMs);
                 },
@@ -307,6 +318,7 @@ export class EdgeRouter {
               transformedStream = createKeepAliveStream(anthropicStream, {
                 pingIntervalMs: 15000,
                 streamStartTime: startMs,
+                onDone: releaseKey,
                 onTtft: (ttftMs) => {
                   MetricsEngine.record(target.providerId, target.model, ttftMs, ttftMs);
                 },
@@ -315,6 +327,7 @@ export class EdgeRouter {
               transformedStream = createKeepAliveStream(upstreamRes.body, {
                 pingIntervalMs: 15000,
                 streamStartTime: startMs,
+                onDone: releaseKey,
                 onTtft: (ttftMs) => {
                   MetricsEngine.record(target.providerId, target.model, ttftMs, ttftMs);
                 },
@@ -436,6 +449,7 @@ export class EdgeRouter {
             }
           }
 
+          releaseKey();
           return Response.json(responseJson, {
             status: 200,
             headers: {
@@ -445,12 +459,14 @@ export class EdgeRouter {
           });
         }
 
+        releaseKey();
         // Other client errors (e.g. 400 Bad Request) are returned directly without failover
         return new Response(errText, {
           status: upstreamRes.status,
           headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
         });
       } catch (err) {
+        releaseKey();
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[Failover] Network error on ${provider.id}/${target.model}: ${msg}`);
         lastError = { status: 504, message: msg };

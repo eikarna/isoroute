@@ -196,13 +196,27 @@ export default async function handler(request: Request): Promise<Response> {
       });
     }
 
-    const models = combos.map((c) => ({
-      id: c.id,
-      object: "model",
-      created: 1700000000,
-      owned_by: "edge-router",
-      display_name: c.displayName,
-    }));
+    const models = combos.map((c) => {
+      const idLower = c.id.toLowerCase();
+      const isVision = idLower.includes("vision") || idLower.includes("gemini") || idLower.includes("claude") || idLower.includes("gpt-4") || idLower.includes("vl");
+      const isReasoning = idLower.includes("o1") || idLower.includes("o3") || idLower.includes("thinking") || idLower.includes("r1") || idLower.includes("gemini-2.5") || idLower.includes("gemini-3") || idLower.includes("claude-3-7");
+      const contextWindow = idLower.includes("gemini") ? 1048576 : (idLower.includes("claude") ? 200000 : 128000);
+
+      return {
+        id: c.id,
+        object: "model",
+        created: 1700000000,
+        owned_by: "isoroute",
+        display_name: c.displayName,
+        context_window: contextWindow,
+        capabilities: {
+          vision: isVision,
+          tools: !idLower.includes("embed"),
+          reasoning: isReasoning,
+          streaming: true,
+        },
+      };
+    });
 
     return Response.json(
       { object: "list", data: models },

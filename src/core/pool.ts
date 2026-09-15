@@ -7,6 +7,8 @@ export interface KeyStatus {
   failureCount: number;
   successCount: number;
   lastUsed: number;
+  inFlight: number;
+  inFlightResetAt?: number;
 }
 
 export class KeyPoolManager {
@@ -26,9 +28,38 @@ export class KeyPoolManager {
   }
 
   /**
+   * Query current in-flight concurrent request count for a key (with auto-decay safety)
+   */
+  static getInFlight(key: string): number {
+    const status = this.poolState.get(key);
+    if (!status) return 0;
+    if (status.inFlight > 0 && status.inFlightResetAt && Date.now() > status.inFlightResetAt) {
+      status.inFlight = 0;
+    }
+    return status.inFlight;
+  }
+
+  /**
+   * Acquire a key for an in-flight request, returning an idempotent release function
+   */
+  static acquireKey(key: string): () => void {
+    const status = this.getOrCreateStatus(key);
+    status.inFlight += 1;
+    status.inFlightResetAt = Date.now() + 60000; // 60s auto-decay TTL
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        status.inFlight = Math.max(0, status.inFlight - 1);
+      }
+    };
+  }
+
+  /**
    * Select next healthy key via configured strategy:
    * - "fallback": always uses the primary (first) healthy key until it hits error/cooldown.
    * - "round-robin": rotates keys every `stickyCount` requests.
+   * - "least-connections": dynamically routes to the key with fewest in-flight requests.
    */
   static selectKey(provider: Provider): string | undefined {
     const keys = this.extractKeys(provider);
@@ -49,6 +80,22 @@ export class KeyPoolManager {
     const candidatePool = healthyKeys.length > 0 ? healthyKeys : keys;
     const strategy = provider.keyStrategy || "fallback";
     const stickyCount = Math.max(1, provider.stickyCount || 1);
+
+    if (strategy === "least-connections") {
+      let bestKey = candidatePool[0];
+      let minInFlight = this.getInFlight(bestKey);
+      for (let i = 1; i < candidatePool.length; i++) {
+        const k = candidatePool[i];
+        const inflight = this.getInFlight(k);
+        if (inflight < minInFlight) {
+          bestKey = k;
+          minInFlight = inflight;
+        }
+      }
+      const status = this.getOrCreateStatus(bestKey);
+      status.lastUsed = now;
+      return bestKey;
+    }
 
     if (strategy === "fallback") {
       const selected = candidatePool[0];
@@ -147,6 +194,7 @@ export class KeyPoolManager {
         failureCount: 0,
         successCount: 0,
         lastUsed: 0,
+        inFlight: 0,
       };
       this.poolState.set(key, status);
     }
