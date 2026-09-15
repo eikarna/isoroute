@@ -508,6 +508,12 @@
           fetch("/api/connections", { headers: getAuthHeaders() }),
         ]);
 
+        if (provRes.status === 401 || keysRes.status === 401 || rulesRes.status === 401) {
+          handleLogout();
+          authError = "Session expired. Please log in again.";
+          return;
+        }
+
         if (statusRes.ok) {
           const s = await statusRes.json();
           metrics = s.metrics || metrics;
