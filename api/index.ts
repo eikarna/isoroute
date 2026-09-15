@@ -10,6 +10,7 @@ import { ProviderProbe } from "../src/core/probe";
 import { KeyManager, type ApiKeyRecord } from "../src/core/keys";
 import { BulkIngestEngine, type BulkParseOptions } from "../src/core/bulk";
 import { BackupEngine } from "../src/core/backup";
+import { activeQuotaSaverConfig, updateQuotaSaverConfig } from "../src/core/quota-saver";
 import type { RouteRule } from "../src/core/rewrite";
 import type { ChatCompletionRequest, ModelCombo, Provider } from "../src/types";
 import { DASHBOARD_HTML } from "../src/dashboardHtml";
@@ -792,6 +793,36 @@ export default async function handler(request: Request): Promise<Response> {
     }
     await storage.clearLogs();
     return Response.json({ success: true }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  // Quota Saver Settings API
+  if (path === "/api/quota-saver") {
+    if (request.method === "GET") {
+      return Response.json(
+        {
+          config: activeQuotaSaverConfig,
+          features: {
+            tool_output_truncation: true,
+            historical_image_stripping: true,
+            middle_out_compaction: true,
+            auto_recover_on_413: true,
+          },
+        },
+        { headers: { "Access-Control-Allow-Origin": "*" } }
+      );
+    }
+    if (request.method === "POST" || request.method === "PUT") {
+      if (!(await AdminAuth.verify(request))) {
+        return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      try {
+        const body = (await request.json()) as any;
+        const updated = updateQuotaSaverConfig(body);
+        return Response.json({ success: true, config: updated }, { headers: { "Access-Control-Allow-Origin": "*" } });
+      } catch (err) {
+        return Response.json({ error: "Invalid JSON configuration" }, { status: 400, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+    }
   }
 
   // 4. Public Landing Page at root (/)

@@ -8,7 +8,7 @@ import { GeminiAdapter } from "../adapters/gemini";
 import { AnthropicAdapter } from "../adapters/anthropic";
 import { RequestSanitizer } from "./sanitizer";
 import { RewriteEngine } from "./rewrite";
-import { QuotaSaverEngine } from "./quota-saver";
+import { QuotaSaverEngine, activeQuotaSaverConfig } from "./quota-saver";
 import { KeyManager, type ApiKeyRecord } from "./keys";
 import { MetricsEngine } from "./metrics";
 import { AdminAuth } from "./auth";
@@ -73,7 +73,7 @@ export class EdgeRouter {
     body.model = requestedModel;
 
     // 2.5 Quota Saver Optimization (Context Compression & Tool Truncation)
-    const { optimizedReq, tokensSaved } = QuotaSaverEngine.optimize(body);
+    const { optimizedReq, tokensSaved } = QuotaSaverEngine.optimize(body, activeQuotaSaverConfig);
     body = optimizedReq;
     if (tokensSaved > 0) {
       console.log(`[QuotaSaver] Optimized payload saved ~${tokensSaved} estimated tokens.`);

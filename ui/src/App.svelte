@@ -88,11 +88,12 @@
     rules: "M4 6h16M4 12h10M4 18h14M18 9l3 3-3 3",
     probe: "M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83",
     bolt: "M13 2 4.09 12.97A1 1 0 0 0 4.86 14.6H11l-1 7.4 8.91-10.97A1 1 0 0 0 18.14 9.4H12z",
+    quotaSaver: "M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6",
     sortAsc: "M11 5h10M11 9h7M11 13h4M3 17l3 3 3-3M6 18V4",
     sortDesc: "M11 5h4M11 9h7M11 13h10M3 7l3-3 3 3M6 6v14",
   };
 
-  type Tab = "overview" | "providers" | "combos" | "keys" | "rules" | "logs" | "playground" | "oauth";
+  type Tab = "overview" | "providers" | "combos" | "keys" | "rules" | "quota-saver" | "logs" | "playground" | "oauth";
 
   let activeTab = $state<Tab>("overview");
   let combos = $state<ModelCombo[]>([]);
@@ -102,6 +103,17 @@
   let loading = $state(true);
   let apiKeys = $state<ApiKeyRecord[]>([]);
   let routeRules = $state<RouteRule[]>([]);
+
+  // Quota Saver state
+  let quotaSaverConfig = $state({
+    enabled: true,
+    maxToolOutputChars: 4000,
+    preserveLastTurns: 4,
+    stripHistoricalImages: true,
+    autoRecoverOn413: true,
+  });
+  let quotaSaverLoading = $state(false);
+  let quotaSaverSavedMsg = $state("");
 
   // Provider Probe state
   let probeLoading = $state(false);
@@ -455,12 +467,13 @@
     const qs = `${rangeParams()}&sortBy=${sortBy}&order=${sortOrder}&limit=${limit}`;
     try {
       if (full) {
-        const [statusRes, combosRes, provRes, keysRes, rulesRes] = await Promise.all([
+        const [statusRes, combosRes, provRes, keysRes, rulesRes, qsRes] = await Promise.all([
           fetch(`/api/status?${qs}`, { headers: getAuthHeaders() }),
           fetch("/api/combos", { headers: getAuthHeaders() }),
           fetch("/api/providers", { headers: getAuthHeaders() }),
           fetch("/api/keys", { headers: getAuthHeaders() }),
           fetch("/api/rules", { headers: getAuthHeaders() }),
+          fetch("/api/quota-saver", { headers: getAuthHeaders() }),
         ]);
 
         if (statusRes.ok) {
@@ -491,6 +504,10 @@
         if (rulesRes.ok) {
           const r = await rulesRes.json();
           routeRules = r.rules || [];
+        }
+        if (qsRes && qsRes.ok) {
+          const q = await qsRes.json();
+          if (q.config) quotaSaverConfig = q.config;
         }
       } else {
         // Lightweight live tick (sub-millisecond SQLite query, zero combo/provider overhead)
@@ -553,6 +570,30 @@
 
   function fmtNum(n?: number): string {
     return n === undefined || n === null ? "—" : n.toLocaleString("en-US");
+  }
+
+  async function handleSaveQuotaSaver() {
+    quotaSaverLoading = true;
+    quotaSaverSavedMsg = "";
+    try {
+      const res = await fetch("/api/quota-saver", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(quotaSaverConfig),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.config) quotaSaverConfig = d.config;
+        quotaSaverSavedMsg = "Configuration saved successfully!";
+        setTimeout(() => (quotaSaverSavedMsg = ""), 3000);
+      } else {
+        quotaSaverSavedMsg = "Failed to save configuration";
+      }
+    } catch (err) {
+      quotaSaverSavedMsg = "Network error";
+    } finally {
+      quotaSaverLoading = false;
+    }
   }
 
   async function handleAddCombo() {
@@ -1222,6 +1263,9 @@
           {@render icon(ICONS.rules)}<span>Force Routing</span>
           <span class="pill-count">{routeRules.length}</span>
         </button>
+        <button class="nav-item" class:active={activeTab === 'quota-saver'} onclick={() => activeTab = 'quota-saver'}>
+          {@render icon(ICONS.quotaSaver)}<span>Quota Saver</span>
+        </button>
         <button class="nav-item" class:active={activeTab === 'logs'} onclick={() => activeTab = 'logs'}>
           {@render icon(ICONS.logs)}<span>Logs</span>
         </button>
@@ -1255,6 +1299,7 @@
           {:else if activeTab === 'combos'}Combos
           {:else if activeTab === 'keys'}API Keys & Billing
           {:else if activeTab === 'rules'}Force Routing
+          {:else if activeTab === 'quota-saver'}Quota Saver
           {:else if activeTab === 'logs'}Logs
           {:else if activeTab === 'playground'}Playground
           {:else if activeTab === 'oauth'}Sessions
@@ -1977,7 +2022,145 @@
             </div>
           </div>
 
-                {:else if activeTab === 'logs'}
+        {:else if activeTab === 'quota-saver'}
+          <div class="tab-pane">
+            <div class="split-layout">
+              <div class="card-list">
+                <div class="item-card">
+                  <div class="card-head">
+                    <div class="title-group">
+                      <span class="type-chip" class:s-ok={quotaSaverConfig.enabled} class:s-err={!quotaSaverConfig.enabled}>
+                        {quotaSaverConfig.enabled ? "ACTIVE" : "BYPASSED"}
+                      </span>
+                      <span class="item-name">Engine Status</span>
+                    </div>
+                  </div>
+                  <div class="bulk-help-banner" style="margin-top: 8px;">
+                    IsoRoute Quota Saver intelligently compresses context, strips redundant historical image tokens, truncates massive tool outputs (terminal logs, compile dumps, diffs), and recovers automatically on HTTP 413 context overflow.
+                  </div>
+
+                  <div class="detail-row" style="margin-top: 12px;">
+                    <span class="d-label">Tool Output Strategy</span>
+                    <span class="d-val">Head/Tail truncation ({quotaSaverConfig.maxToolOutputChars.toLocaleString()} chars cap)</span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="d-label">Protected Turns</span>
+                    <span class="d-val">Last {quotaSaverConfig.preserveLastTurns} turns preserved 100% intact</span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="d-label">Historical Images</span>
+                    <span class="d-val">{quotaSaverConfig.stripHistoricalImages ? "Stripped on turns older than protected window" : "Retained"}</span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="d-label">Emergency 413 Recovery</span>
+                    <span class="d-val">{quotaSaverConfig.autoRecoverOn413 ? "Middle-Out Compaction with Auto-Retry" : "Disabled"}</span>
+                  </div>
+                </div>
+
+                <div class="item-card">
+                  <div class="card-head">
+                    <div class="title-group">
+                      <span class="type-chip">ARCHITECTURE</span>
+                      <span class="item-name">3-Zone Context Compaction Rule</span>
+                    </div>
+                  </div>
+                  <div class="table-container" style="margin-top: 8px;">
+                    <table class="dense-table">
+                      <thead>
+                        <tr>
+                          <th>Zone</th>
+                          <th>Target Messages</th>
+                          <th>Policy</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><span class="type-chip s-ok">ZONE 1</span></td>
+                          <td><code>system</code> &amp; initial user prompt</td>
+                          <td><strong>Immutable</strong> · Never truncated or stripped</td>
+                        </tr>
+                        <tr>
+                          <td><span class="type-chip">ZONE 2</span></td>
+                          <td>Historical intermediate turns &amp; old tool results</td>
+                          <td><strong>Compacted</strong> · Tool outputs truncated, images stripped</td>
+                        </tr>
+                        <tr>
+                          <td><span class="type-chip s-ok">ZONE 3</span></td>
+                          <td>Active turn &amp; last {quotaSaverConfig.preserveLastTurns} recent messages</td>
+                          <td><strong>Protected</strong> · Kept 100% full fidelity</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div class="drawer-box">
+                <div class="drawer-header-row">
+                  <div class="drawer-title-group">
+                    <div class="drawer-title">Quota Saver Controls</div>
+                  </div>
+                </div>
+
+                <div class="drawer-collapsible-body">
+                  <div class="field">
+                    <label for="qs-master">Master Toggle</label>
+                    <select id="qs-master" bind:value={quotaSaverConfig.enabled}>
+                      <option value={true}>Enabled (Active)</option>
+                      <option value={false}>Disabled (Bypass)</option>
+                    </select>
+                  </div>
+
+                  <div class="field">
+                    <div class="label-row">
+                      <label for="qs-max-chars">Max Tool Output Chars</label>
+                      <span class="keys-detected-tag">{quotaSaverConfig.maxToolOutputChars.toLocaleString()} chars</span>
+                    </div>
+                    <input id="qs-max-chars" type="number" min="500" max="32000" step="500" bind:value={quotaSaverConfig.maxToolOutputChars} />
+                    <span class="field-hint">Truncates middle of long tool outputs while keeping head &amp; tail.</span>
+                  </div>
+
+                  <div class="field">
+                    <div class="label-row">
+                      <label for="qs-preserve-turns">Preserve Recent Turns</label>
+                      <span class="keys-detected-tag">{quotaSaverConfig.preserveLastTurns} turns</span>
+                    </div>
+                    <input id="qs-preserve-turns" type="number" min="1" max="10" bind:value={quotaSaverConfig.preserveLastTurns} />
+                    <span class="field-hint">Recent messages guaranteed to be untouched.</span>
+                  </div>
+
+                  <div class="field">
+                    <label for="qs-strip-img">Historical Multimodal Stripping</label>
+                    <select id="qs-strip-img" bind:value={quotaSaverConfig.stripHistoricalImages}>
+                      <option value={true}>Enabled (Omit older images)</option>
+                      <option value={false}>Disabled (Keep all images)</option>
+                    </select>
+                    <span class="field-hint">Replaces old images with text placeholders to save megabytes of tokens.</span>
+                  </div>
+
+                  <div class="field">
+                    <label for="qs-auto-413">Auto-Recover on HTTP 413</label>
+                    <select id="qs-auto-413" bind:value={quotaSaverConfig.autoRecoverOn413}>
+                      <option value={true}>Enabled (Middle-out retry)</option>
+                      <option value={false}>Disabled (Fail immediately)</option>
+                    </select>
+                    <span class="field-hint">Automatically compacts middle messages if model context overflows.</span>
+                  </div>
+
+                  <div class="action-row" style="margin-top: 14px;">
+                    <button class="btn-brand" disabled={quotaSaverLoading} onclick={handleSaveQuotaSaver}>
+                      {quotaSaverLoading ? "Saving..." : "Save Configuration"}
+                    </button>
+                    {#if quotaSaverSavedMsg}
+                      <span class="status-inline">{quotaSaverSavedMsg}</span>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        {:else if activeTab === 'logs'}
           <div class="tab-pane">
             <div class="toolbar">
               <div class="seg" role="group" aria-label="Time range">
@@ -2251,20 +2434,36 @@
           <div class="modal-backdrop" onclick={handleCloseEditKey} role="presentation">
             <div class="modal-card" onclick={(e) => e.stopPropagation()} role="presentation" style="max-width: 620px;">
               <div class="modal-header">
-                <div class="modal-title">Edit Consumer Key · <code>{editingKey.key.slice(0, 10)}...{editingKey.key.slice(-4)}</code></div>
+                <div class="modal-title">
+                  Edit Consumer Key · <code>{editingKey.key.slice(0, 10)}...{editingKey.key.slice(-4)}</code>
+                  {#if editingKey.expiresAt && Date.now() > editingKey.expiresAt}
+                    <span class="type-chip s-err" style="margin-left: 6px;">EXPIRED</span>
+                  {:else if (editingKey.maxRequests && editingKey.usedRequests >= editingKey.maxRequests) || (editingKey.maxTokens && editingKey.usedTokens >= editingKey.maxTokens)}
+                    <span class="type-chip s-err" style="margin-left: 6px;">EXHAUSTED</span>
+                  {:else if editingKey.enabled}
+                    <span class="type-chip s-ok" style="margin-left: 6px;">ACTIVE</span>
+                  {:else}
+                    <span class="type-chip s-err" style="margin-left: 6px;">DISABLED</span>
+                  {/if}
+                </div>
                 <button class="modal-close" onclick={handleCloseEditKey} title="Close">✕</button>
               </div>
 
               <div class="modal-body">
+                {#if editingKey.expiresAt && Date.now() > editingKey.expiresAt}
+                  <div class="bulk-help-banner" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5; margin-bottom: 14px;">
+                    <strong>Notice · Key Expired:</strong> This key expired on <strong>{new Date(editingKey.expiresAt).toLocaleDateString("en-GB")}</strong> and incoming client requests are automatically blocked with <code>HTTP 403 API key has expired</code>. Update or clear the expiration date below to reactivate.
+                  </div>
+                {/if}
                 <div class="form-row">
                   <div class="field" style="flex: 2;">
                     <label for="edit-k-name">Key Name / Label</label>
                     <input id="edit-k-name" bind:value={editKeyName} placeholder="e.g. Production Mobile App" />
                   </div>
                   <div class="field" style="flex: 1;">
-                    <label for="edit-k-status">Status</label>
+                    <label for="edit-k-status">Administrative State</label>
                     <select id="edit-k-status" bind:value={editKeyEnabled}>
-                      <option value={true}>Active</option>
+                      <option value={true}>Active (Enabled)</option>
                       <option value={false}>Disabled</option>
                     </select>
                   </div>

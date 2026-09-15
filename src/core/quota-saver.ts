@@ -24,6 +24,13 @@ export const DEFAULT_QUOTA_SAVER_CONFIG: QuotaSaverConfig = {
   autoRecoverOn413: true,
 };
 
+export let activeQuotaSaverConfig: QuotaSaverConfig = { ...DEFAULT_QUOTA_SAVER_CONFIG };
+
+export function updateQuotaSaverConfig(patch: Partial<QuotaSaverConfig>): QuotaSaverConfig {
+  activeQuotaSaverConfig = { ...activeQuotaSaverConfig, ...patch };
+  return activeQuotaSaverConfig;
+}
+
 export class QuotaSaverEngine {
   /**
    * Optimize conversation payload by compressing long tool outputs and historical multimodal content

@@ -12,7 +12,7 @@ import { KeyManager, type ApiKeyRecord } from "./core/keys";
 import { BulkIngestEngine, type BulkParseOptions } from "./core/bulk";
 import { BackupEngine } from "./core/backup";
 import { SentinelEngine } from "./core/sentinel";
-import { DEFAULT_QUOTA_SAVER_CONFIG } from "./core/quota-saver";
+import { DEFAULT_QUOTA_SAVER_CONFIG, activeQuotaSaverConfig, updateQuotaSaverConfig } from "./core/quota-saver";
 import type { RouteRule } from "./core/rewrite";
 import type { ChatCompletionRequest, ModelCombo, Provider } from "./types";
 import { DASHBOARD_HTML } from "./dashboardHtml";
@@ -830,19 +830,33 @@ export default {
     }
 
     // 3.9 Quota Saver Settings API
-    if (path === "/api/quota-saver" && request.method === "GET") {
-      return Response.json(
-        {
-          config: DEFAULT_QUOTA_SAVER_CONFIG,
-          features: {
-            tool_output_truncation: true,
-            historical_image_stripping: true,
-            middle_out_compaction: true,
-            auto_recover_on_413: true,
+    if (path === "/api/quota-saver") {
+      if (request.method === "GET") {
+        return Response.json(
+          {
+            config: activeQuotaSaverConfig,
+            features: {
+              tool_output_truncation: true,
+              historical_image_stripping: true,
+              middle_out_compaction: true,
+              auto_recover_on_413: true,
+            },
           },
-        },
-        { headers: { "Access-Control-Allow-Origin": "*" } }
-      );
+          { headers: { "Access-Control-Allow-Origin": "*" } }
+        );
+      }
+      if (request.method === "POST" || request.method === "PUT") {
+        if (!(await AdminAuth.verify(request, env.ADMIN_PASSWORD))) {
+          return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+        }
+        try {
+          const body = (await request.json()) as any;
+          const updated = updateQuotaSaverConfig(body);
+          return Response.json({ success: true, config: updated }, { headers: { "Access-Control-Allow-Origin": "*" } });
+        } catch (err) {
+          return Response.json({ error: "Invalid JSON configuration" }, { status: 400, headers: { "Access-Control-Allow-Origin": "*" } });
+        }
+      }
     }
 
     // 4. Public Landing Page at root (/)
