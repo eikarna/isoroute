@@ -16,6 +16,7 @@ import { PUBLIC_LANDING_HTML } from "../src/landingHtml";
 
 export const config = {
   runtime: "edge",
+  regions: ["iad1"],
 };
 
 const seedProviders: Provider[] = [

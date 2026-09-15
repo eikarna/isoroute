@@ -172,7 +172,7 @@ export class EdgeRouter {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), target.timeoutMs || 25000);
 
-        const upstreamRes = await fetch(upstreamUrl, {
+        let upstreamRes = await fetch(upstreamUrl, {
           method: "POST",
           headers,
           body: JSON.stringify(upstreamBody),
@@ -183,12 +183,37 @@ export class EdgeRouter {
         const latencyMs = Date.now() - startMs;
 
         // Circuit Breaker & Failover check
-        const errText = !upstreamRes.ok ? await upstreamRes.text() : "";
-        const isGeoBlocked = upstreamRes.status === 400 && (
+        let errText = !upstreamRes.ok ? await upstreamRes.text() : "";
+        let isGeoBlocked = upstreamRes.status === 400 && (
           errText.includes("User location") ||
           errText.includes("FAILED_PRECONDITION") ||
           errText.includes("location is not supported")
         );
+
+        // Auto-recover from Geo-Blocking via Cloudflare AI Gateway
+        if (isGeoBlocked && provider.type === "gemini" && !upstreamUrl.includes("gateway.ai.cloudflare.com")) {
+          const gatewayBase = "https://gateway.ai.cloudflare.com/v1/55652c981f1479f487a7978990d6c430/nixai/google-ai-studio";
+          const gatewayUrl = upstreamUrl.replace(/https:\/\/generativelanguage\.googleapis\.com/, gatewayBase);
+          console.warn(`[GeoBlock Bypass] Retrying ${target.providerId}/${target.model} via Cloudflare AI Gateway...`);
+          try {
+            const gwRes = await fetch(gatewayUrl, {
+              method: "POST",
+              headers,
+              body: JSON.stringify(upstreamBody),
+              signal: AbortSignal.timeout(target.timeoutMs || 25000),
+            });
+            upstreamRes = gwRes;
+            if (!upstreamRes.ok) {
+              errText = await upstreamRes.text();
+            } else {
+              errText = "";
+            }
+            isGeoBlocked = false;
+          } catch (gwErr) {
+            console.warn(`[GeoBlock Bypass] Gateway fallback failed: ${gwErr}`);
+          }
+        }
+
         const isFailoverStatus = [401, 403, 404, 408, 429, 500, 502, 503, 504].includes(upstreamRes.status) || isGeoBlocked;
 
         if (isFailoverStatus) {
