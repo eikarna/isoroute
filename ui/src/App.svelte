@@ -1499,21 +1499,26 @@
 
         {:else if activeTab === 'providers'}
           <div class="tab-pane">
+            <div class="view-header-bar">
+              <div class="search-bar">
+                <input
+                  type="text"
+                  class="search-input"
+                  placeholder="Search providers (id, name, url)..."
+                  bind:value={providerSearch}
+                />
+                {#if providerSearch}
+                  <button class="search-clear" onclick={() => providerSearch = ''} title="Clear">✕</button>
+                {/if}
+                <span class="search-count">{filteredProviders.length}/{providers.length}</span>
+              </div>
+              <button class="btn-create-trigger" class:active={mobileDrawerOpen['providers']} onclick={() => toggleMobileDrawer('providers')}>
+                {mobileDrawerOpen['providers'] ? "✕ Close Form" : "+ Add Provider"}
+              </button>
+            </div>
+
             <div class="split-layout">
               <div class="card-list">
-                <div class="search-bar">
-                  <input
-                    type="text"
-                    class="search-input"
-                    placeholder="Search providers (id, name, url)..."
-                    bind:value={providerSearch}
-                  />
-                  {#if providerSearch}
-                    <button class="search-clear" onclick={() => providerSearch = ''} title="Clear">✕</button>
-                  {/if}
-                  <span class="search-count">{filteredProviders.length}/{providers.length}</span>
-                </div>
-
                 {#each filteredProviders as prov (prov.id)}
                   <div class="item-card">
                     <div class="card-head">
@@ -1553,9 +1558,6 @@
                 <div class="drawer-header-row">
                   <div class="drawer-title-group">
                     <div class="drawer-title">{provDrawerMode === 'single' ? "Register provider" : "Bulk Ingest"}</div>
-                    <button type="button" class="drawer-mobile-btn mobile-only" onclick={() => toggleMobileDrawer('providers')}>
-                      {mobileDrawerOpen['providers'] ? "Hide" : "+ Add / Bulk"}
-                    </button>
                   </div>
                   <div class="subtab-group">
                     <button class="subtab-btn" class:active={provDrawerMode === 'single'} onclick={() => { provDrawerMode = 'single'; mobileDrawerOpen['providers'] = true; }}>Single</button>
@@ -1720,21 +1722,26 @@
 
         {:else if activeTab === 'combos'}
           <div class="tab-pane">
+            <div class="view-header-bar">
+              <div class="search-bar">
+                <input
+                  type="text"
+                  class="search-input"
+                  placeholder="Search combos or upstream models..."
+                  bind:value={comboSearch}
+                />
+                {#if comboSearch}
+                  <button class="search-clear" onclick={() => comboSearch = ''} title="Clear">✕</button>
+                {/if}
+                <span class="search-count">{filteredCombos.length}/{combos.length}</span>
+              </div>
+              <button class="btn-create-trigger" class:active={mobileDrawerOpen['combos']} onclick={() => toggleMobileDrawer('combos')}>
+                {mobileDrawerOpen['combos'] ? "✕ Close Form" : "+ Create Combo"}
+              </button>
+            </div>
+
             <div class="split-layout">
               <div class="card-list">
-                <div class="search-bar">
-                  <input
-                    type="text"
-                    class="search-input"
-                    placeholder="Search combos or upstream models..."
-                    bind:value={comboSearch}
-                  />
-                  {#if comboSearch}
-                    <button class="search-clear" onclick={() => comboSearch = ''} title="Clear">✕</button>
-                  {/if}
-                  <span class="search-count">{filteredCombos.length}/{combos.length}</span>
-                </div>
-
                 {#each filteredCombos as combo (combo.id)}
                   {@const load = comboLoad.get(combo.id) ?? 0}
                   <div class="item-card">
@@ -1776,9 +1783,6 @@
                 <div class="drawer-header-row">
                   <div class="drawer-title-group">
                     <div class="drawer-title">Create combo</div>
-                    <button type="button" class="drawer-mobile-btn mobile-only" onclick={() => toggleMobileDrawer('combos')}>
-                      {mobileDrawerOpen['combos'] ? "Hide" : "+ Create Combo"}
-                    </button>
                   </div>
                 </div>
 
@@ -1826,85 +1830,87 @@
           </div>
 
 {:else if activeTab === 'keys'}
-          <div class="tab-pane">
-            <div class="split-layout">
-              <div class="card-list">
-                <div class="search-bar">
-                  <input
-                    type="text"
-                    class="search-input"
-                    placeholder="Search keys by name or snippet..."
-                    bind:value={keySearch}
-                  />
-                  {#if keySearch}
-                    <button class="search-clear" onclick={() => keySearch = ''} title="Clear">✕</button>
-                  {/if}
-                  <span class="search-count">{filteredApiKeys.length}/{apiKeys.length}</span>
-                </div>
+  <div class="tab-pane">
+    <div class="view-header-bar">
+      <div class="search-bar">
+        <input
+          type="text"
+          class="search-input"
+          placeholder="Search keys by name or snippet..."
+          bind:value={keySearch}
+        />
+        {#if keySearch}
+          <button class="search-clear" onclick={() => keySearch = ''} title="Clear">✕</button>
+        {/if}
+        <span class="search-count">{filteredApiKeys.length}/{apiKeys.length}</span>
+      </div>
+      <button class="btn-create-trigger" class:active={mobileDrawerOpen['keys']} onclick={() => toggleMobileDrawer('keys')}>
+        {mobileDrawerOpen['keys'] ? "✕ Close Form" : "+ Issue Key"}
+      </button>
+    </div>
 
-                {#each filteredApiKeys as k (k.id)}
-                  {@const isExpired = k.expiresAt && Date.now() > k.expiresAt}
-                  {@const isExhausted = (k.maxRequests && k.usedRequests >= k.maxRequests) || (k.maxTokens && k.usedTokens >= k.maxTokens)}
-                  <div class="item-card">
-                    <div class="card-head">
-                      <div class="title-group">
-                        <span class="type-chip" class:s-err={!k.enabled || isExpired || isExhausted} class:s-ok={k.enabled && !isExpired && !isExhausted}>
-                          {isExpired ? "EXPIRED" : isExhausted ? "EXHAUSTED" : k.enabled ? "ACTIVE" : "DISABLED"}
-                        </span>
-                        <span class="item-name">{k.name}</span>
-                        <code class="item-slug">{k.key.slice(0, 12)}...{k.key.slice(-4)}</code>
-                      </div>
-                      <div class="card-actions">
-                        <button class="btn-subtle" onclick={() => handleOpenEditKey(k)}>Edit</button>
-                        <button class="btn-danger" onclick={() => handleDeleteKey(k.id)}>Revoke</button>
-                      </div>
-                    </div>
-
-                    <div class="detail-row">
-                      <span class="d-label">Raw Key</span>
-                      <code class="d-val selectable">{k.key}</code>
-                    </div>
-
-                    <div class="detail-row">
-                      <span class="d-label">Requests</span>
-                      <span class="d-val">{k.usedRequests.toLocaleString()} / {k.maxRequests ? k.maxRequests.toLocaleString() : "Unlimited"}</span>
-                    </div>
-
-                    <div class="detail-row">
-                      <span class="d-label">Tokens</span>
-                      <span class="d-val">{k.usedTokens.toLocaleString()} / {k.maxTokens ? k.maxTokens.toLocaleString() : "Unlimited"} (in {k.usedPromptTokens.toLocaleString()} · out {k.usedCompletionTokens.toLocaleString()})</span>
-                    </div>
-
-                    <div class="detail-row">
-                      <span class="d-label">Expires</span>
-                      <span class="d-val">{k.expiresAt ? new Date(k.expiresAt).toLocaleDateString("en-GB") : "Never"}</span>
-                    </div>
-
-                    {#if k.allowedModels && k.allowedModels.length > 0}
-                      <div class="detail-row"><span class="d-label">Models</span><span class="d-val">{k.allowedModels.join(", ")}</span></div>
-                    {/if}
-
-                    {#if k.requiredHeaders}
-                      <div class="detail-row"><span class="d-label">Guards</span><span class="d-val">{JSON.stringify(k.requiredHeaders)}</span></div>
-                    {/if}
-                  </div>
-                {/each}
-                {#if apiKeys.length === 0}
-                  <div class="empty-cell">No consumer API keys issued yet.</div>
-                {:else if filteredApiKeys.length === 0}
-                  <div class="empty-cell">No keys matching "{keySearch}"</div>
-                {/if}
+    <div class="split-layout">
+      <div class="card-list">
+        {#each filteredApiKeys as k (k.id)}
+          {@const isExpired = k.expiresAt && Date.now() > k.expiresAt}
+          {@const isExhausted = (k.maxRequests && k.usedRequests >= k.maxRequests) || (k.maxTokens && k.usedTokens >= k.maxTokens)}
+          <div class="item-card">
+            <div class="card-head">
+              <div class="title-group">
+                <span class="type-chip" class:s-err={!k.enabled || isExpired || isExhausted} class:s-ok={k.enabled && !isExpired && !isExhausted}>
+                  {isExpired ? "EXPIRED" : isExhausted ? "EXHAUSTED" : k.enabled ? "ACTIVE" : "DISABLED"}
+                </span>
+                <span class="item-name">{k.name}</span>
+                <code class="item-slug">{k.key.slice(0, 12)}...{k.key.slice(-4)}</code>
               </div>
+              <div class="card-actions">
+                <button class="btn-subtle" onclick={() => handleOpenEditKey(k)}>Edit</button>
+                <button class="btn-danger" onclick={() => handleDeleteKey(k.id)}>Revoke</button>
+              </div>
+            </div>
 
-              <div class="drawer-box" class:mobile-open={mobileDrawerOpen['keys']}>
-                <div class="drawer-header-row">
-                  <div class="drawer-title-group">
-                    <div class="drawer-title">Issue Consumer API Key</div>
-                    <button type="button" class="drawer-mobile-btn mobile-only" onclick={() => toggleMobileDrawer('keys')}>
-                      {mobileDrawerOpen['keys'] ? "Hide" : "+ Issue Key"}
-                    </button>
-                  </div>
-                </div>
+            <div class="detail-row">
+              <span class="d-label">Raw Key</span>
+              <code class="d-val selectable">{k.key}</code>
+            </div>
+
+            <div class="detail-row">
+              <span class="d-label">Requests</span>
+              <span class="d-val">{k.usedRequests.toLocaleString()} / {k.maxRequests ? k.maxRequests.toLocaleString() : "Unlimited"}</span>
+            </div>
+
+            <div class="detail-row">
+              <span class="d-label">Tokens</span>
+              <span class="d-val">{k.usedTokens.toLocaleString()} / {k.maxTokens ? k.maxTokens.toLocaleString() : "Unlimited"} (in {k.usedPromptTokens.toLocaleString()} · out {k.usedCompletionTokens.toLocaleString()})</span>
+            </div>
+
+            <div class="detail-row">
+              <span class="d-label">Expires</span>
+              <span class="d-val">{k.expiresAt ? new Date(k.expiresAt).toLocaleDateString("en-GB") : "Never"}</span>
+            </div>
+
+            {#if k.allowedModels && k.allowedModels.length > 0}
+              <div class="detail-row"><span class="d-label">Models</span><span class="d-val">{k.allowedModels.join(", ")}</span></div>
+            {/if}
+
+            {#if k.requiredHeaders}
+              <div class="detail-row"><span class="d-label">Guards</span><span class="d-val">{JSON.stringify(k.requiredHeaders)}</span></div>
+            {/if}
+          </div>
+        {/each}
+        {#if apiKeys.length === 0}
+          <div class="empty-cell">No consumer API keys issued yet.</div>
+        {:else if filteredApiKeys.length === 0}
+          <div class="empty-cell">No keys matching "{keySearch}"</div>
+        {/if}
+      </div>
+
+      <div class="drawer-box" class:mobile-open={mobileDrawerOpen['keys']}>
+        <div class="drawer-header-row">
+          <div class="drawer-title-group">
+            <div class="drawer-title">Issue Consumer API Key</div>
+          </div>
+        </div>
 
                 <div class="drawer-collapsible-body">
                 <div class="field">
@@ -1958,21 +1964,26 @@
 
         {:else if activeTab === 'rules'}
           <div class="tab-pane">
+            <div class="view-header-bar">
+              <div class="search-bar">
+                <input
+                  type="text"
+                  class="search-input"
+                  placeholder="Search pattern or target..."
+                  bind:value={ruleSearch}
+                />
+                {#if ruleSearch}
+                  <button class="search-clear" onclick={() => ruleSearch = ''} title="Clear">✕</button>
+                {/if}
+                <span class="search-count">{filteredRules.length}/{routeRules.length}</span>
+              </div>
+              <button class="btn-create-trigger" class:active={mobileDrawerOpen['rules']} onclick={() => toggleMobileDrawer('rules')}>
+                {mobileDrawerOpen['rules'] ? "✕ Close Form" : "+ Add Rule"}
+              </button>
+            </div>
+
             <div class="split-layout">
               <div class="card-list">
-                <div class="search-bar">
-                  <input
-                    type="text"
-                    class="search-input"
-                    placeholder="Search pattern or target..."
-                    bind:value={ruleSearch}
-                  />
-                  {#if ruleSearch}
-                    <button class="search-clear" onclick={() => ruleSearch = ''} title="Clear">✕</button>
-                  {/if}
-                  <span class="search-count">{filteredRules.length}/{routeRules.length}</span>
-                </div>
-
                 {#each filteredRules as r (r.id)}
                   <div class="item-card">
                     <div class="card-head">
@@ -1982,7 +1993,9 @@
                         <span class="step-arr">➔</span>
                         <code class="item-slug text-white">{r.target}</code>
                       </div>
-                      <button class="btn-danger" onclick={() => handleDeleteRule(r.id)}>Delete</button>
+                      <div class="card-actions">
+                        <button class="btn-danger" onclick={() => handleDeleteRule(r.id)}>Delete</button>
+                      </div>
                     </div>
                   </div>
                 {/each}
@@ -1997,9 +2010,6 @@
                 <div class="drawer-header-row">
                   <div class="drawer-title-group">
                     <div class="drawer-title">Create Force Routing Rule</div>
-                    <button type="button" class="drawer-mobile-btn mobile-only" onclick={() => toggleMobileDrawer('rules')}>
-                      {mobileDrawerOpen['rules'] ? "Hide" : "+ Add Rule"}
-                    </button>
                   </div>
                 </div>
 
@@ -2995,6 +3005,47 @@
   .split-layout { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; align-items: start; }
   .card-list { display: flex; flex-direction: column; gap: 9px; }
 
+  /* View Toolbar & Full-Width Search Header */
+  .view-header-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    margin-bottom: 6px;
+    box-sizing: border-box;
+  }
+  .view-header-bar .search-bar {
+    flex: 1;
+    margin-bottom: 0;
+  }
+  .btn-create-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-highlight);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 6px 14px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 120ms ease;
+    min-height: 33px;
+    box-sizing: border-box;
+  }
+  .btn-create-trigger:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--text-dim);
+  }
+  .btn-create-trigger.active {
+    background: var(--surface-elevated);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
   /* Search bar */
   .search-bar {
     display: flex;
@@ -3127,19 +3178,29 @@
   }
   .step-prio { color: var(--text-dim); font-size: 9.5px; justify-self: end; }
 
-  /* Drawer forms */
+  /* Hybrid Form & Creation Console Panel */
   .drawer-box {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    padding: 14px;
+    background: #0d0d10;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 11px;
+    gap: 12px;
     height: fit-content;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
   }
   .wide-box { max-width: 640px; }
-  .drawer-title { font-size: 12px; font-weight: 600; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+  .drawer-title {
+    font-size: 11.5px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
   .drawer-collapsible-body {
     display: flex;
     flex-direction: column;
@@ -3662,50 +3723,54 @@
       margin-left: unset;
     }
 
-    /* Drawer Box Mobile */
+    /* Top View Header Bar on Mobile */
+    .view-header-bar {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      margin-bottom: 6px;
+    }
+    .view-header-bar .search-bar {
+      flex: 1;
+      min-width: 0;
+      width: 100%;
+    }
+    .btn-create-trigger {
+      padding: 6px 11px;
+      font-size: 11px;
+      flex-shrink: 0;
+      min-height: 33px;
+    }
+
+    /* Hybrid Form Drawer on Mobile */
     .drawer-box {
       order: -1;
       width: 100%;
       box-sizing: border-box;
-      margin-bottom: 10px;
-      padding: 10px 12px;
-    }
-    .drawer-mobile-btn {
-      display: inline-flex !important;
+      margin-bottom: 12px;
+      padding: 14px;
+      background: #0f0f13;
+      border: 1px solid var(--border-highlight);
+      border-radius: 6px;
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+      animation: drawerSlideDown 150ms ease-out;
     }
     .drawer-box:not(.mobile-open) {
-      padding: 0;
-      background: transparent;
-      border: none;
-      margin-bottom: 6px;
-    }
-    .drawer-box:not(.mobile-open) .drawer-header-row {
-      border-bottom: none;
-      padding-bottom: 0;
-      width: 100%;
-    }
-    .drawer-box:not(.mobile-open) .drawer-title-group {
-      width: 100%;
-    }
-    .drawer-box:not(.mobile-open) .drawer-title {
-      display: none;
-    }
-    .drawer-box:not(.mobile-open) .subtab-group {
-      display: none;
-    }
-    .drawer-box:not(.mobile-open) .drawer-mobile-btn {
-      width: 100%;
-      justify-content: center;
-      padding: 8px 12px;
-      font-size: 12px;
-      font-weight: 500;
-      border: 1px dashed var(--border-highlight);
-      background: rgba(255, 255, 255, 0.02);
-      border-radius: 5px;
-      color: var(--accent);
-    }
-    .drawer-box:not(.mobile-open) .drawer-collapsible-body {
       display: none !important;
+    }
+    .drawer-box.mobile-open {
+      display: flex !important;
+    }
+    .drawer-box .drawer-header-row {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .drawer-box .drawer-collapsible-body {
+      display: flex !important;
     }
 
     .modal-backdrop {
