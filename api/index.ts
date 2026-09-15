@@ -2,6 +2,7 @@
 import { EdgeRouter } from "../src/core/router";
 import { TursoStorageAdapter } from "../src/storage/turso";
 import { MemoryStorageAdapter, type StorageAdapter } from "../src/storage";
+import { CachedStorageAdapter } from "../src/storage/cached";
 import { ModelDiscovery } from "../src/core/discovery";
 import { OAuthManager } from "../src/core/oauth";
 import { AdminAuth } from "../src/core/auth";
@@ -62,7 +63,7 @@ async function getRouter(): Promise<{ router: EdgeRouter; storage: StorageAdapte
     return { router: cachedRouter, storage: cachedStorage };
   }
 
-  let storage: StorageAdapter;
+  let rawStorage: StorageAdapter;
   const tursoUrl = process.env.TURSO_DATABASE_URL;
   const tursoToken = process.env.TURSO_AUTH_TOKEN;
 
@@ -71,10 +72,12 @@ async function getRouter(): Promise<{ router: EdgeRouter; storage: StorageAdapte
     try {
       await turso.initSchema();
     } catch {}
-    storage = turso;
+    rawStorage = turso;
   } else {
-    storage = new MemoryStorageAdapter();
+    rawStorage = new MemoryStorageAdapter();
   }
+
+  const storage = new CachedStorageAdapter(rawStorage, 60000);
 
   if (!initialized) {
     const existing = await storage.getCombos();

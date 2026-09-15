@@ -13,19 +13,36 @@ import { MetricsEngine } from "./metrics";
 import { AdminAuth } from "./auth";
 
 export class EdgeRouter {
+  private ctx?: { waitUntil(promise: Promise<unknown>): void };
+
   constructor(private storage: StorageAdapter, private onLog?: (log: TelemetryLog) => void) {}
 
   private logRecord(log: TelemetryLog): void {
-    this.storage.recordLog(log);
-    try {
-      this.onLog?.(log);
-    } catch {}
+    const task = async () => {
+      try {
+        await this.storage.recordLog(log);
+        this.onLog?.(log);
+      } catch (err) {
+        console.error("[Telemetry] Failed to record log:", err);
+      }
+    };
+
+    if (this.ctx?.waitUntil) {
+      this.ctx.waitUntil(task());
+    } else {
+      task();
+    }
   }
 
   /**
    * Main dispatch entry for /v1/chat/completions
    */
-  async dispatch(req: Request, body: ChatCompletionRequest): Promise<Response> {
+  async dispatch(
+    req: Request,
+    body: ChatCompletionRequest,
+    ctx?: { waitUntil(promise: Promise<unknown>): void }
+  ): Promise<Response> {
+    this.ctx = ctx;
     // 1. API Key Auth & Quota Enforcement
     let matchedApiKey: ApiKeyRecord | null = null;
     const authHeader = req.headers.get("Authorization");
@@ -250,12 +267,23 @@ export class EdgeRouter {
             });
 
             if (matchedApiKey) {
-              this.storage.deductKeyUsage(matchedApiKey.id, {
-                requests: 1,
-                tokens: tot,
-                promptTokens: usage.prompt_tokens ?? 0,
-                completionTokens: usage.completion_tokens ?? 0,
-              });
+              const deductTask = async () => {
+                try {
+                  await this.storage.deductKeyUsage(matchedApiKey.id, {
+                    requests: 1,
+                    tokens: tot,
+                    promptTokens: usage.prompt_tokens ?? 0,
+                    completionTokens: usage.completion_tokens ?? 0,
+                  });
+                } catch (err) {
+                  console.error("[Billing] Failed to deduct key usage:", err);
+                }
+              };
+              if (this.ctx?.waitUntil) {
+                this.ctx.waitUntil(deductTask());
+              } else {
+                deductTask();
+              }
             }
           };
 
@@ -375,12 +403,23 @@ export class EdgeRouter {
           MetricsEngine.record(target.providerId, target.model, latencyMs, latencyMs);
 
           if (matchedApiKey) {
-            this.storage.deductKeyUsage(matchedApiKey.id, {
-              requests: 1,
-              tokens: tot,
-              promptTokens: usage?.prompt_tokens ?? 0,
-              completionTokens: usage?.completion_tokens ?? 0,
-            });
+            const deductTask = async () => {
+              try {
+                await this.storage.deductKeyUsage(matchedApiKey.id, {
+                  requests: 1,
+                  tokens: tot,
+                  promptTokens: usage?.prompt_tokens ?? 0,
+                  completionTokens: usage?.completion_tokens ?? 0,
+                });
+              } catch (err) {
+                console.error("[Billing] Failed to deduct key usage:", err);
+              }
+            };
+            if (this.ctx?.waitUntil) {
+              this.ctx.waitUntil(deductTask());
+            } else {
+              deductTask();
+            }
           }
 
           return Response.json(responseJson, {
@@ -435,6 +474,31 @@ export class EdgeRouter {
       if (provider) {
         return [{ providerId, model: rawModel }];
       }
+    }
+
+    // 3. Fallback: Fuzzy Smart Aliasing (ONLY runs when model would otherwise return 404!)
+    const allCombos = await this.storage.getCombos();
+    const activeCombos = allCombos.filter((c) => c.enabled !== false && c.targets && c.targets.length > 0);
+    const lower = modelName.toLowerCase();
+
+    // Prioritize non-free combos (*-latest / smart-tier) over legacy free-* combos
+    const nonFreeCombos = activeCombos.filter((c) => !c.id.startsWith("free-"));
+    const pool = nonFreeCombos.length > 0 ? nonFreeCombos : activeCombos;
+
+    let fallbackCombo: (typeof activeCombos)[0] | undefined;
+    if (lower.startsWith("claude") || lower.startsWith("sonnet") || lower.startsWith("opus")) {
+      fallbackCombo = pool.find((c) => c.id === "smart-tier" || c.id === "claude-sonnet-latest" || c.id === "claude-opus-latest" || c.id.includes("claude"));
+    } else if (lower.startsWith("gemini")) {
+      fallbackCombo = pool.find((c) => c.id === "gemini-flash-latest" || c.id === "gemini-pro-latest" || c.id.includes("gemini"));
+    } else if (lower.startsWith("gpt") || lower.startsWith("o1") || lower.startsWith("o3") || lower.startsWith("o4")) {
+      fallbackCombo = pool.find((c) => c.id === "gpt-latest" || c.id === "smart-tier" || c.id.includes("gpt"));
+    } else if (lower.startsWith("deepseek")) {
+      fallbackCombo = pool.find((c) => c.id === "deepseek-pro-latest" || c.id === "deepseek-flash-latest" || c.id.includes("deepseek"));
+    }
+
+    if (fallbackCombo) {
+      console.warn(`[Fuzzy Route] Model '${modelName}' not found; resolving to fallback combo '${fallbackCombo.id}'`);
+      return MetricsEngine.sortTargets(fallbackCombo.targets, fallbackCombo.strategy || "fallback", fallbackCombo.id);
     }
 
     return [];

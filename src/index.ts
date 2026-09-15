@@ -1,6 +1,7 @@
 // Entrypoint: Isomorphic Serverless & Bun Native Runtime
 import { EdgeRouter } from "./core/router";
 import { SqliteStorageAdapter } from "./storage/sqlite";
+import { CachedStorageAdapter } from "./storage/cached";
 import { ModelDiscovery } from "./core/discovery";
 import { OAuthManager } from "./core/oauth";
 import { AdminAuth } from "./core/auth";
@@ -65,7 +66,8 @@ const initialCombos: ModelCombo[] = [
   },
 ];
 
-const storage = new SqliteStorageAdapter("edge-router.db");
+const rawStorage = new SqliteStorageAdapter("edge-router.db");
+const storage = new CachedStorageAdapter(rawStorage, 60000);
 
 // Seed initial default test providers & combos if empty
 const existingProviders = await storage.getProviders();

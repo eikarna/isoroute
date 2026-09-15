@@ -3,6 +3,7 @@ import { EdgeRouter } from "./core/router";
 import { D1StorageAdapter, type D1Database } from "./storage/d1";
 import { TursoStorageAdapter } from "./storage/turso";
 import { MemoryStorageAdapter, type StorageAdapter } from "./storage";
+import { CachedStorageAdapter } from "./storage/cached";
 import { ModelDiscovery } from "./core/discovery";
 import { OAuthManager } from "./core/oauth";
 import { AdminAuth } from "./core/auth";
@@ -71,18 +72,20 @@ async function getRouter(env: Env): Promise<{ router: EdgeRouter; storage: Stora
     return { router: cachedRouter, storage: cachedStorage };
   }
 
-  let storage: StorageAdapter;
+  let rawStorage: StorageAdapter;
   if (env.TURSO_DATABASE_URL && env.TURSO_AUTH_TOKEN) {
     const turso = new TursoStorageAdapter(env.TURSO_DATABASE_URL, env.TURSO_AUTH_TOKEN);
     try {
       await turso.initSchema();
     } catch {}
-    storage = turso;
+    rawStorage = turso;
   } else if (env.DB) {
-    storage = new D1StorageAdapter(env.DB);
+    rawStorage = new D1StorageAdapter(env.DB);
   } else {
-    storage = new MemoryStorageAdapter();
+    rawStorage = new MemoryStorageAdapter();
   }
+
+  const storage = new CachedStorageAdapter(rawStorage, 60000);
 
   if (!initialized) {
     const existing = await storage.getCombos();
@@ -199,7 +202,7 @@ export default {
     if (path === "/v1/chat/completions" && request.method === "POST") {
       try {
         const body = (await request.json()) as ChatCompletionRequest;
-        return await router.dispatch(request, body);
+        return await router.dispatch(request, body, ctx);
       } catch (err) {
         return Response.json(
           { error: { message: err instanceof Error ? err.message : "Invalid JSON", type: "invalid_request_error" } },
