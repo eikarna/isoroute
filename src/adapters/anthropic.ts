@@ -154,6 +154,25 @@ export class AnthropicAdapter {
     if (req.temperature !== undefined) payload.temperature = req.temperature;
     if (req.top_p !== undefined) payload.top_p = req.top_p;
 
+    // Thinking & Reasoning Effort Support (Claude 3.7 Sonnet, etc.)
+    const clientThinking = (req as any).thinking;
+    const clientReasoning = (req as any).reasoning_effort;
+
+    let thinkingBudget: number | undefined;
+    if (clientThinking && typeof clientThinking === "object" && clientThinking.budget_tokens) {
+      thinkingBudget = clientThinking.budget_tokens;
+    } else if (clientReasoning) {
+      if (clientReasoning === "low") thinkingBudget = 2048;
+      else if (clientReasoning === "medium") thinkingBudget = 4096;
+      else if (clientReasoning === "high") thinkingBudget = 8192;
+    }
+
+    if (thinkingBudget && thinkingBudget > 0) {
+      payload.thinking = { type: "enabled", budget_tokens: thinkingBudget };
+      payload.max_tokens = Math.max(payload.max_tokens, thinkingBudget + 2048);
+      delete payload.temperature;
+    }
+
     // Tools conversion
     if (Array.isArray(req.tools) && req.tools.length > 0) {
       payload.tools = req.tools.map((t) => ({

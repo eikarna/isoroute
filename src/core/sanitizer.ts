@@ -17,17 +17,54 @@ export class RequestSanitizer {
       delete sanitized.tool_choice;
     }
 
-    // 3. Remove undefined / null properties
+    // 3. Normalize reasoning parameters across providers
+    const modelStr = String(sanitized.model || "").toLowerCase();
+    const isReasoningModel =
+      modelStr.includes("o1") ||
+      modelStr.includes("o3") ||
+      modelStr.includes("o4") ||
+      modelStr.includes("deepseek-r1") ||
+      modelStr.includes("thinking") ||
+      modelStr.includes("reasoner");
+
+    if (provider.type === "openai") {
+      delete sanitized.top_k;
+
+      if (isReasoningModel) {
+        // Map Anthropic-style thinking budget to OpenAI reasoning_effort if present
+        const thinkingObj = (sanitized as any).thinking;
+        if (thinkingObj && typeof thinkingObj === "object" && thinkingObj.budget_tokens && !(sanitized as any).reasoning_effort) {
+          const budget = thinkingObj.budget_tokens;
+          if (budget < 3000) (sanitized as any).reasoning_effort = "low";
+          else if (budget < 7000) (sanitized as any).reasoning_effort = "medium";
+          else (sanitized as any).reasoning_effort = "high";
+        }
+        delete (sanitized as any).thinking;
+        delete (sanitized as any).thinkingConfig;
+
+        // Alias max_tokens to max_completion_tokens for OpenAI reasoning models
+        if (sanitized.max_tokens !== undefined && (sanitized as any).max_completion_tokens === undefined) {
+          (sanitized as any).max_completion_tokens = sanitized.max_tokens;
+          delete sanitized.max_tokens;
+        }
+      } else {
+        // Non-reasoning model: strip reasoning parameters to prevent upstream 400 rejection
+        delete (sanitized as any).reasoning_effort;
+        delete (sanitized as any).thinking;
+        delete (sanitized as any).thinkingConfig;
+
+        // Back-fill max_tokens if client only supplied max_completion_tokens
+        if (sanitized.max_tokens === undefined && (sanitized as any).max_completion_tokens !== undefined) {
+          sanitized.max_tokens = (sanitized as any).max_completion_tokens;
+        }
+      }
+    }
+
+    // 4. Remove undefined / null properties
     for (const key of Object.keys(sanitized)) {
       if (sanitized[key] === undefined || sanitized[key] === null) {
         delete sanitized[key];
       }
-    }
-
-    // 4. Provider-specific stripping
-    if (provider.type === "openai") {
-      // If provider has custom headers or is standard OpenAI, ensure only official fields pass
-      delete sanitized.top_k; // OpenAI doesn't support top_k
     }
 
     return sanitized;

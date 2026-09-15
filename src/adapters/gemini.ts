@@ -187,6 +187,27 @@ export class GeminiAdapter {
       };
     }
 
+    // Thinking Config Support (Gemini 2.5 / 3 Flash & Pro)
+    const clientThinking = (req as any).thinking;
+    const clientReasoning = (req as any).reasoning_effort;
+
+    let geminiThinkingBudget: number | undefined;
+    if (clientThinking && typeof clientThinking === "object" && clientThinking.budget_tokens !== undefined) {
+      geminiThinkingBudget = clientThinking.budget_tokens;
+    } else if (clientReasoning) {
+      if (clientReasoning === "low") geminiThinkingBudget = 2048;
+      else if (clientReasoning === "medium") geminiThinkingBudget = 4096;
+      else if (clientReasoning === "high") geminiThinkingBudget = 8192;
+      else if (clientReasoning === "none") geminiThinkingBudget = 0;
+    }
+
+    if (geminiThinkingBudget !== undefined) {
+      if (!payload.generationConfig) payload.generationConfig = {};
+      (payload.generationConfig as any).thinkingConfig = {
+        thinkingBudget: geminiThinkingBudget,
+      };
+    }
+
     // Function Calling / Tools
     if (Array.isArray(req.tools) && req.tools.length > 0) {
       payload.tools = [

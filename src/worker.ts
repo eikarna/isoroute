@@ -11,6 +11,7 @@ import { ProviderProbe } from "./core/probe";
 import { KeyManager, type ApiKeyRecord } from "./core/keys";
 import { BulkIngestEngine, type BulkParseOptions } from "./core/bulk";
 import { BackupEngine } from "./core/backup";
+import { SentinelEngine } from "./core/sentinel";
 import type { RouteRule } from "./core/rewrite";
 import type { ChatCompletionRequest, ModelCombo, Provider } from "./types";
 import { DASHBOARD_HTML } from "./dashboardHtml";
@@ -804,6 +805,15 @@ export default {
       return Response.json({ success: true }, { headers: { "Access-Control-Allow-Origin": "*" } });
     }
 
+    // 3.8 Sentinel Manual Trigger API
+    if (path === "/api/sentinel/run" && request.method === "POST") {
+      if (!(await AdminAuth.verify(request, env.ADMIN_PASSWORD))) {
+        return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      const result = await SentinelEngine.runSentinel(storage);
+      return Response.json({ success: true, ...result }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+
     // 4. Public Landing Page at root (/)
     if (path === "/" || path === "/index.html") {
       return new Response(PUBLIC_LANDING_HTML, {
@@ -819,5 +829,10 @@ export default {
     }
 
     return new Response("Not Found", { status: 404 });
+  },
+
+  async scheduled(event: any, env: Env, ctx: ExecutionContext): Promise<void> {
+    const { storage } = await getRouter(env);
+    ctx.waitUntil(SentinelEngine.runSentinel(storage));
   },
 };

@@ -106,6 +106,32 @@ export class KeyPoolManager {
     status.failureCount = Math.max(0, status.failureCount - 1);
   }
 
+  /**
+   * Return all keys currently locked in cooldown
+   */
+  static getCooldownKeys(): string[] {
+    const now = Date.now();
+    const result: string[] = [];
+    for (const [key, status] of this.poolState.entries()) {
+      if (status.cooldownUntil > now) {
+        result.push(key);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Manually or automatically clear cooldown for a key (e.g. after Sentinel verification)
+   */
+  static clearCooldown(key: string): void {
+    const status = this.poolState.get(key);
+    if (status) {
+      status.cooldownUntil = 0;
+      status.failureCount = 0;
+      console.log(`[CircuitBreaker] Cooldown cleared for key '...${key.slice(-4)}'`);
+    }
+  }
+
   static reset(): void {
     this.poolState.clear();
     this.rrIndexes.clear();
