@@ -5,6 +5,7 @@ import type { Provider, ModelCombo } from "../types";
 import type { RouteRule } from "./rewrite";
 import type { ApiKeyRecord } from "./keys";
 import type { StorageAdapter } from "../storage";
+import { redactProviderSecrets } from "../storage/secrets";
 import { BulkIngestEngine } from "./bulk";
 
 export interface IsoRouteBackup {
@@ -45,7 +46,9 @@ export class BackupEngine {
       version: "1.0",
       generator: "IsoRoute",
       exportedAt: new Date().toISOString(),
-      providers,
+      // Never export upstream credentials. Restores can re-import explicit
+      // credentials through typed connection flows instead.
+      providers: providers.map(redactProviderSecrets),
       combos,
       rules,
       apiKeys,

@@ -3,12 +3,14 @@ import { EdgeRouter } from "./core/router";
 import { SqliteStorageAdapter } from "./storage/sqlite";
 import { CachedStorageAdapter } from "./storage/cached";
 import { ModelDiscovery } from "./core/discovery";
-import { OAuthManager } from "./core/oauth";
+import { BUILTIN_OAUTH_PROVIDER_CATALOG, OAuthManager } from "./core/oauth";
 import { AdminAuth } from "./core/auth";
 import { ProviderProbe } from "./core/probe";
 import { KeyManager, type ApiKeyRecord } from "./core/keys";
 import { BulkIngestEngine, type BulkParseOptions } from "./core/bulk";
 import { BackupEngine } from "./core/backup";
+import { SecretStorageAdapter, redactProviderSecrets } from "./storage/secrets";
+import type { StorageAdapter } from "./storage";
 import type { RouteRule } from "./core/rewrite";
 import type { ChatCompletionRequest, ModelCombo, Provider } from "./types";
 import DASHBOARD_HTML from "../dist/index.html" with { type: "text" };
@@ -66,7 +68,14 @@ const initialCombos: ModelCombo[] = [
   },
 ];
 
-const rawStorage = new SqliteStorageAdapter("edge-router.db");
+let rawStorage: StorageAdapter = new SqliteStorageAdapter("edge-router.db");
+if (process.env.MASTER_KEY) {
+  try {
+    rawStorage = await SecretStorageAdapter.create(rawStorage, process.env.MASTER_KEY);
+  } catch (err) {
+    console.error("Failed to initialize SecretStorageAdapter:", err);
+  }
+}
 const storage = new CachedStorageAdapter(rawStorage, 60000);
 
 // Seed initial default test providers & combos if empty
@@ -603,7 +612,7 @@ export async function handleRequest(request: Request): Promise<Response> {
           p.baseUrl.toLowerCase().includes(q)
       );
     }
-    return Response.json({ providers, total: providers.length }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    return Response.json({ providers: providers.map(redactProviderSecrets), total: providers.length }, { headers: { "Access-Control-Allow-Origin": "*" } });
   }
 
   if ((path === "/api/providers" && request.method === "POST") || (path.startsWith("/api/providers/") && !path.endsWith("/models") && request.method === "PUT")) {
@@ -618,12 +627,18 @@ export async function handleRequest(request: Request): Promise<Response> {
     if (!id) {
       return Response.json({ error: "Provider ID required" }, { status: 400, headers: { "Access-Control-Allow-Origin": "*" } });
     }
+    if (body.oauth) {
+      return Response.json(
+        { error: "OAuth credentials must be created through a typed provider connection" },
+        { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
+      );
+    }
     const existing = await storage.getProvider(id);
     const provider: Provider = {
       id: id.trim().toLowerCase(),
       name: body.name ?? existing?.name ?? id,
       baseUrl: body.baseUrl ?? existing?.baseUrl ?? "",
-      apiKey: body.apiKey !== undefined ? body.apiKey : existing?.apiKey,
+      apiKey: *** !== undefined ? body.apiKey : ***
       type: body.type ?? existing?.type ?? "openai",
       headers: body.headers ?? existing?.headers,
       oauth: body.oauth ?? existing?.oauth,
@@ -632,7 +647,7 @@ export async function handleRequest(request: Request): Promise<Response> {
       stickyCount: body.stickyCount ? Math.max(1, Number(body.stickyCount)) : (existing?.stickyCount ?? 1),
     };
     await storage.saveProvider(provider);
-    return Response.json({ success: true, provider }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    return Response.json({ success: true, provider: redactProviderSecrets(provider) }, { headers: { "Access-Control-Allow-Origin": "*" } });
   }
 
   if (path.startsWith("/api/providers/") && path.endsWith("/models") && request.method === "GET") {
@@ -816,31 +831,86 @@ export async function handleRequest(request: Request): Promise<Response> {
     return Response.json({ success: true }, { headers: { "Access-Control-Allow-Origin": "*" } });
   }
 
-  // 4. OAuth Session JSON Importer (Kiro, Codex, Antigravity)
-  if (path === "/api/oauth/import" && request.method === "POST") {
+  if (path === "/api/connections/catalog" && request.method === "GET") {
     if (!(await AdminAuth.verify(request))) {
       return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
     }
-    try {
-      const { providerId, sessionJson } = (await request.json()) as { providerId: string; sessionJson: string };
-      const parsedOAuth = OAuthManager.parseSessionJson(sessionJson);
-      const existing = await storage.getProvider(providerId);
+    const connections = await storage.getProviders();
+    const catalog = BUILTIN_OAUTH_PROVIDER_CATALOG.map((definition) => ({
+      ...definition,
+      connected: connections.filter((provider) => provider.connection?.catalogId === definition.id).length,
+    }));
+    return Response.json({ catalog }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
 
-      if (!existing) {
-        return Response.json({ error: "Provider not found" }, { status: 404 });
-      }
-
-      existing.oauth = {
-        ...existing.oauth,
-        ...parsedOAuth,
-        type: parsedOAuth.type || "session_json",
-      };
-
-      await storage.saveProvider(existing);
-      return Response.json({ success: true, message: `OAuth session imported for ${providerId}` });
-    } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Import failed" }, { status: 400 });
+  if (path === "/api/connections" && request.method === "GET") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
     }
+    const connections = (await storage.getProviders())
+      .filter((provider) => provider.connection)
+      .map(redactProviderSecrets);
+    return Response.json({ connections }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/connections" && request.method === "POST") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    if (!process.env.MASTER_KEY) {
+      return Response.json({ error: "Credential imports require the MASTER_KEY secret" }, { status: 503, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    try {
+      const { catalogId, label, sessionJson } = (await request.json()) as {
+        catalogId?: string;
+        label?: string;
+        sessionJson?: string;
+      };
+      if (!catalogId || !label || !sessionJson) {
+        return Response.json({ error: "catalogId, label, and sessionJson are required" }, { status: 400, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      const definition = BUILTIN_OAUTH_PROVIDER_CATALOG.find((item) => item.id === catalogId);
+      if (!definition) {
+        return Response.json({ error: "Unknown built-in provider" }, { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
+      if (!definition.available) {
+        return Response.json(
+          { error: definition.availabilityNote || `${definition.name} is not available in this deployment` },
+          { status: 409, headers: { "Access-Control-Allow-Origin": "*" } }
+        );
+      }
+      const provider = OAuthManager.createBuiltinConnection({ catalogId, label, sessionJson });
+      await storage.saveProvider(provider);
+      return Response.json(
+        { success: true, provider: redactProviderSecrets(provider) },
+        { status: 201, headers: { "Access-Control-Allow-Origin": "*" } }
+      );
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Connection import failed" },
+        { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
+      );
+    }
+  }
+
+  if (path.startsWith("/api/connections/") && request.method === "DELETE") {
+    if (!(await AdminAuth.verify(request))) {
+      return Response.json({ error: "Unauthorized: Admin login required" }, { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const id = decodeURIComponent(path.slice("/api/connections/".length));
+    const provider = await storage.getProvider(id);
+    if (!provider?.connection) {
+      return Response.json({ error: "Connection not found" }, { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    await storage.deleteProvider(id);
+    return Response.json({ success: true, deleted: id }, { headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (path === "/api/oauth/import" && request.method === "POST") {
+    return Response.json(
+      { error: "Deprecated endpoint: create a typed connection through /api/connections instead" },
+      { status: 410, headers: { "Access-Control-Allow-Origin": "*" } }
+    );
   }
 
   // 5. Public Landing Page at root (/)

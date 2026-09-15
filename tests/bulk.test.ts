@@ -39,7 +39,7 @@ describe("Bulk Ingestion Engine", () => {
     expect(parsed[0].headers?.Cookie).toBe("session_token=secret_sess_123; auth_jwt=eyJhbGciOi...");
   });
 
-  it("parses OAuth & Session JSON objects (Cursor/Kiro/Google ADC)", () => {
+  it("ignores raw OAuth session documents in generic bulk ingest", () => {
     const sessionJson = JSON.stringify({
       name: "Cursor Pro Session",
       accessToken: "cur_acc_123",
@@ -48,9 +48,7 @@ describe("Bulk Ingestion Engine", () => {
     });
 
     const parsed = BulkIngestEngine.parseCredentials(sessionJson);
-    expect(parsed.length).toBe(1);
-    expect(parsed[0].oauth?.refreshToken).toBe("cur_ref_456");
-    expect(parsed[0].oauth?.tokenEndpoint).toBe("https://api.cursor.com/token");
+    expect(parsed.length).toBe(0);
   });
 
   it("parses bulk model lists and maps them to Combos", () => {

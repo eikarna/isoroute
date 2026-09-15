@@ -8,7 +8,15 @@ export interface ProviderOAuth {
   refreshToken?: string;
   accessToken?: string;
   expiresAt?: number;
-  rawSessionJson?: string;
+  /** AES-GCM envelope persisted by SecretStorageAdapter; never exposed to callers. */
+  sealed?: string;
+}
+
+export interface ProviderConnection {
+  catalogId: string;
+  transport: "gemini-native" | "native-bridge" | "cursor-official" | "generic-oauth";
+  status: "active" | "bridge-required" | "unsupported";
+  createdAt: number;
 }
 
 export type ProviderKeyStrategy = "fallback" | "round-robin";
@@ -18,9 +26,12 @@ export interface Provider {
   name: string;
   baseUrl: string;
   apiKey?: string;
+  /** Derived for authenticated dashboard responses; never persisted as a credential. */
+  keyCount?: number;
   type: "openai" | "anthropic" | "gemini" | "custom";
   headers?: Record<string, string>;
   oauth?: ProviderOAuth;
+  connection?: ProviderConnection;
   enabled: boolean;
   keyStrategy?: ProviderKeyStrategy;
   stickyCount?: number;

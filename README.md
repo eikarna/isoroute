@@ -61,7 +61,8 @@ bunx wrangler deploy
 ```
 
 Configure environment variables in Cloudflare dashboard or `wrangler.jsonc`:
-- `ADMIN_PASSWORD`: Custom master password.
+- `ADMIN_PASSWORD`: Required production administrative password. There is no production default.
+- `MASTER_KEY`: Required for encrypted upstream API keys and provider connection credentials. Use a random value of at least 32 characters and keep it stable.
 - `TURSO_DATABASE_URL`: `libsql://<your-db>.turso.io` *(optional, for high write limits)*
 - `TURSO_AUTH_TOKEN`: `<your-turso-token>`
 

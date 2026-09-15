@@ -16,14 +16,35 @@
     enabled: boolean;
   }
 
+  interface ProviderConnection {
+    catalogId: string;
+    transport: "gemini-native" | "native-bridge" | "cursor-official" | "generic-oauth";
+    status: "active" | "bridge-required" | "unsupported";
+    documentationUrl?: string;
+  }
+
   interface Provider {
     id: string;
     name: string;
     baseUrl: string;
     apiKey?: string;
-    type: "openai" | "gemini" | "anthropic";
+    keyCount?: number;
+    type: "openai" | "gemini" | "anthropic" | "custom";
     enabled: boolean;
-    oauth?: { type: string; expiresAt?: number; refreshToken?: string };
+    oauth?: { type: string; expiresAt?: number };
+    connection?: ProviderConnection;
+  }
+
+  interface BuiltinConnectionDefinition {
+    id: string;
+    name: string;
+    description: string;
+    transport: ProviderConnection["transport"];
+    connectionMode: "session_import" | "native_bridge" | "api_key";
+    available: boolean;
+    availabilityNote?: string;
+    documentationUrl: string;
+    connected: number;
   }
 
   interface TelemetryLog {
@@ -229,9 +250,17 @@
       .filter(Boolean).length
   );
 
-  let oauthProviderId = $state("");
+  let oauthCatalog = $state<BuiltinConnectionDefinition[]>([]);
+  let oauthConnections = $state<Provider[]>([]);
+  let oauthCatalogId = $state("google-adc");
+  let oauthConnectionLabel = $state("");
   let oauthJson = $state("");
   let oauthStatusMsg = $state("");
+  let oauthSaving = $state(false);
+
+  const selectedOAuthDefinition = $derived(
+    oauthCatalog.find((definition) => definition.id === oauthCatalogId)
+  );
 
   // Config Backup & Migration State
   let showImportModal = $state(false);
@@ -246,6 +275,7 @@
     combos: false,
     keys: false,
     rules: false,
+    oauth: false,
   });
 
   function toggleMobileDrawer(tab: string) {
@@ -467,13 +497,15 @@
     const qs = `${rangeParams()}&sortBy=${sortBy}&order=${sortOrder}&limit=${limit}`;
     try {
       if (full) {
-        const [statusRes, combosRes, provRes, keysRes, rulesRes, qsRes] = await Promise.all([
+        const [statusRes, combosRes, provRes, keysRes, rulesRes, qsRes, catalogRes, connectionsRes] = await Promise.all([
           fetch(`/api/status?${qs}`, { headers: getAuthHeaders() }),
           fetch("/api/combos", { headers: getAuthHeaders() }),
           fetch("/api/providers", { headers: getAuthHeaders() }),
           fetch("/api/keys", { headers: getAuthHeaders() }),
           fetch("/api/rules", { headers: getAuthHeaders() }),
           fetch("/api/quota-saver", { headers: getAuthHeaders() }),
+          fetch("/api/connections/catalog", { headers: getAuthHeaders() }),
+          fetch("/api/connections", { headers: getAuthHeaders() }),
         ]);
 
         if (statusRes.ok) {
@@ -495,7 +527,6 @@
           const p = await provRes.json();
           providers = p.providers || [];
           if (providers.length > 0 && !newComboProvider) newComboProvider = providers[0].id;
-          if (providers.length > 0 && !oauthProviderId) oauthProviderId = providers[0].id;
         }
         if (keysRes.ok) {
           const k = await keysRes.json();
@@ -508,6 +539,17 @@
         if (qsRes && qsRes.ok) {
           const q = await qsRes.json();
           if (q.config) quotaSaverConfig = q.config;
+        }
+        if (catalogRes.ok) {
+          const payload = await catalogRes.json();
+          oauthCatalog = payload.catalog || [];
+          if (!oauthCatalog.some((definition) => definition.id === oauthCatalogId)) {
+            oauthCatalogId = oauthCatalog[0]?.id || "";
+          }
+        }
+        if (connectionsRes.ok) {
+          const payload = await connectionsRes.json();
+          oauthConnections = payload.connections || [];
         }
       } else {
         // Lightweight live tick (sub-millisecond SQLite query, zero combo/provider overhead)
@@ -771,24 +813,47 @@
     await refreshData();
   }
 
-  async function handleImportOAuth() {
-    if (!oauthProviderId || !oauthJson) return;
-    oauthStatusMsg = "Parsing session...";
+  async function handleCreateConnection() {
+    if (!selectedOAuthDefinition || !oauthConnectionLabel.trim() || !oauthJson.trim()) return;
+    oauthSaving = true;
+    oauthStatusMsg = "Validating credentials...";
     try {
-      const res = await fetch("/api/oauth/import", {
+      const res = await fetch("/api/connections", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ providerId: oauthProviderId, sessionJson: oauthJson }),
+        body: JSON.stringify({
+          catalogId: oauthCatalogId,
+          label: oauthConnectionLabel.trim(),
+          sessionJson: oauthJson,
+        }),
       });
       const data = await res.json();
-      oauthStatusMsg = res.ok ? `Imported session for ${oauthProviderId}` : `Failed: ${data.error}`;
+      oauthStatusMsg = res.ok ? `Connected ${data.provider?.name || oauthConnectionLabel}` : `Failed: ${data.error || res.statusText}`;
       if (res.ok) {
+        oauthConnectionLabel = "";
         oauthJson = "";
-        await refreshData();
+        await refreshData(true);
       }
     } catch (err) {
       oauthStatusMsg = `Error: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      oauthSaving = false;
     }
+  }
+
+  async function handleDeleteConnection(id: string) {
+    if (!confirm("Disconnect this provider connection?")) return;
+    const res = await fetch(`/api/connections/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      oauthStatusMsg = `Failed: ${data.error || res.statusText}`;
+      return;
+    }
+    oauthStatusMsg = "Connection removed";
+    await refreshData(true);
   }
 
 
@@ -1537,13 +1602,15 @@
                       </div>
                     </div>
                     <div class="detail-row"><span class="d-label">Base URL</span><code class="d-val">{prov.baseUrl}</code></div>
-                    {#if prov.apiKey}
+                    {#if (prov.keyCount ?? 0) > 0}
                       <div class="detail-row">
                         <span class="d-label">Keys</span>
-                        <span class="d-val">{prov.apiKey.split(/[\n,]/).map(k=>k.trim()).filter(Boolean).length} in pool ({prov.keyStrategy || 'fallback'})</span>
+                        <span class="d-val">{prov.keyCount} in pool ({prov.keyStrategy || 'fallback'})</span>
                       </div>
                     {/if}
-                    {#if prov.oauth}
+                    {#if prov.connection}
+                      <div class="detail-row"><span class="d-label">Connection</span><span class="d-val">{prov.connection.catalogId} · {prov.connection.transport}</span></div>
+                    {:else if prov.oauth}
                       <div class="detail-row"><span class="d-label">Session</span><span class="d-val">{prov.oauth.type}</span></div>
                     {/if}
                   </div>
@@ -1696,7 +1763,7 @@
                     </div>
                   {:else}
                     <div class="bulk-help-banner">
-                      Auto-detects Nvidia (<code>nvapi-</code>), Anthropic (<code>sk-ant-</code>), Gemini (<code>AIzaSy</code>), Groq (<code>gsk_</code>), OpenRouter (<code>sk-or-</code>), Cookie headers, or OAuth Session JSON.
+                      Auto-detects Nvidia (<code>nvapi-</code>), Anthropic (<code>sk-ant-</code>), Gemini (<code>AIzaSy</code>), Groq (<code>gsk_</code>), OpenRouter (<code>sk-or-</code>), and API-key headers. OAuth credentials use Provider Connections.
                     </div>
                     <div class="field">
                       <label for="bulk-inp">Raw Payload / Multiple Credentials</label>
@@ -2299,80 +2366,100 @@
 
         {:else if activeTab === 'oauth'}
           <div class="tab-pane">
-            <div class="split-layout">
-              <div class="drawer-box">
-                <div class="drawer-title">Import CLI session</div>
-                <div class="field">
-                  <label for="oa-prov">Target Provider</label>
-                  <select id="oa-prov" bind:value={oauthProviderId}>
-                    {#each providers as prov}
-                      <option value={prov.id}>{prov.name} ({prov.id})</option>
-                    {/each}
-                  </select>
+            <div class="session-header">
+              <div>
+                <div class="section-eyebrow">Provider Connections</div>
+                <div class="section-subtitle">Typed credentials and transports. A connection never changes an arbitrary provider into an OpenAI-compatible upstream.</div>
+              </div>
+              <div class="session-count">{oauthConnections.length} active</div>
+            </div>
+
+            <div class="mobile-action-bar mobile-only">
+              <button class="btn-mobile-toggle" onclick={() => toggleMobileDrawer('oauth')}>
+                {mobileDrawerOpen['oauth'] ? "Close Connection Form" : "Add Connection"}
+              </button>
+            </div>
+
+            <div class="session-layout">
+              <div class="session-main">
+                <div class="catalog-grid">
+                  {#each oauthCatalog as definition (definition.id)}
+                    <button
+                      class="catalog-card"
+                      class:selected={oauthCatalogId === definition.id}
+                      class:unavailable={!definition.available}
+                      onclick={() => { oauthCatalogId = definition.id; oauthStatusMsg = ""; }}
+                    >
+                      <span class="catalog-card-top">
+                        <span class="type-chip">{definition.transport}</span>
+                        <span class="catalog-count">{definition.connected}</span>
+                      </span>
+                      <span class="catalog-name">{definition.name}</span>
+                      <span class="catalog-description">{definition.description}</span>
+                      {#if !definition.available}
+                        <span class="catalog-note">{definition.availabilityNote || "Unavailable"}</span>
+                      {/if}
+                    </button>
+                  {/each}
                 </div>
-                <div class="field">
-                  <label for="oa-json">Session JSON Payload</label>
-                  <textarea
-                    id="oa-json"
-                    rows="12"
-                    bind:value={oauthJson}
-                    placeholder={'{\n  "client_id": "…",\n  "client_secret": "…",\n  "refresh_token": "…",\n  "type": "authorized_user"\n}'}
-                  ></textarea>
-                </div>
-                <div class="action-row">
-                  <button class="btn-brand" onclick={handleImportOAuth}>Import Session Credentials</button>
-                  {#if oauthStatusMsg}<span class="status-inline">{oauthStatusMsg}</span>{/if}
+
+                <div class="connection-list">
+                  <div class="list-heading">Connected Accounts</div>
+                  {#each oauthConnections as connection (connection.id)}
+                    <div class="item-card connection-card">
+                      <div class="card-head">
+                        <div class="title-group">
+                          <span class="type-chip">{connection.connection?.transport}</span>
+                          <span class="item-name">{connection.name}</span>
+                          <code class="item-slug">{connection.id}</code>
+                        </div>
+                        <button class="btn-danger" onclick={() => handleDeleteConnection(connection.id)}>Disconnect</button>
+                      </div>
+                      <div class="detail-row"><span class="d-label">Catalog</span><span class="d-val">{connection.connection?.catalogId}</span></div>
+                      <div class="detail-row"><span class="d-label">Status</span><span class="d-val">{connection.connection?.status || "active"}</span></div>
+                    </div>
+                  {:else}
+                    <div class="empty-cell">No provider connections yet.</div>
+                  {/each}
                 </div>
               </div>
 
-              <div class="drawer-box">
-                <div class="drawer-title">CLI Session Formats &amp; Extraction</div>
-                
-                <div class="bulk-help-banner" style="margin-top: 2px;">
-                  Import persistent CLI credentials directly from your local terminal or IDE configs to bypass manual token rotation.
-                </div>
+              <div class="drawer-box connection-drawer" class:mobile-open={mobileDrawerOpen['oauth']}>
+                <div class="drawer-title">Create Connection</div>
+                {#if selectedOAuthDefinition}
+                  <div class="target-info-card">
+                    <strong>{selectedOAuthDefinition.name}</strong>
+                    <span>{selectedOAuthDefinition.transport} · {selectedOAuthDefinition.connectionMode}</span>
+                  </div>
 
-                <div class="detail-row" style="margin-top: 10px;">
-                  <span class="d-label">Google ADC</span>
-                  <span class="d-val"><code>~/.config/gcloud/application_default_credentials.json</code></span>
-                </div>
-                <div class="detail-row">
-                  <span class="d-label">Cursor IDE</span>
-                  <span class="d-val">Session cookies / tokens (<code>WorkosCursorSessionToken</code>)</span>
-                </div>
-                <div class="detail-row">
-                  <span class="d-label">Kiro / Claude</span>
-                  <span class="d-val">OAuth refresh tokens with automatic grant rotation</span>
-                </div>
-
-                <div class="table-container" style="margin-top: 14px;">
-                  <table class="dense-table">
-                    <thead>
-                      <tr>
-                        <th>Field</th>
-                        <th>Required</th>
-                        <th>Description</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td><code>refresh_token</code></td>
-                        <td><span class="type-chip s-ok">YES</span></td>
-                        <td>Long-lived OAuth token used for token refresh</td>
-                      </tr>
-                      <tr>
-                        <td><code>client_id</code></td>
-                        <td><span class="type-chip">OPTIONAL</span></td>
-                        <td>OAuth app client identifier (if custom client)</td>
-                      </tr>
-                      <tr>
-                        <td><code>token_uri</code></td>
-                        <td><span class="type-chip">OPTIONAL</span></td>
-                        <td>Token exchange endpoint (defaults to Google/provider endpoint)</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                  {#if selectedOAuthDefinition.available && selectedOAuthDefinition.connectionMode === 'session_import'}
+                    <div class="field">
+                      <label for="oa-label">Connection Label</label>
+                      <input id="oa-label" bind:value={oauthConnectionLabel} placeholder="Personal Google ADC" />
+                    </div>
+                    <div class="field">
+                      <label for="oa-json">Authorized User JSON</label>
+                      <textarea
+                        id="oa-json"
+                        rows="12"
+                        bind:value={oauthJson}
+                        placeholder={'{\n  "type": "authorized_user",\n  "client_id": "…",\n  "client_secret": "…",\n  "refresh_token": "…"\n}'}
+                      ></textarea>
+                      <span class="field-hint">Only Google authorized_user ADC documents are accepted. The token endpoint is pinned to Google.</span>
+                    </div>
+                    <button class="btn-brand wide" disabled={oauthSaving || !oauthConnectionLabel.trim() || !oauthJson.trim()} onclick={handleCreateConnection}>
+                      {oauthSaving ? "Connecting…" : "Create Encrypted Connection"}
+                    </button>
+                  {:else}
+                    <div class="bulk-help-banner">
+                      {selectedOAuthDefinition.availabilityNote || "This connector is not available in the current deployment."}
+                    </div>
+                    <a class="btn-subtle docs-link" href={selectedOAuthDefinition.documentationUrl} target="_blank" rel="noreferrer">Read integration documentation</a>
+                  {/if}
+                {:else}
+                  <div class="empty-cell">No connection catalog is available.</div>
+                {/if}
+                {#if oauthStatusMsg}<div class="status-inline">{oauthStatusMsg}</div>{/if}
               </div>
             </div>
           </div>
@@ -3064,6 +3151,99 @@
   .feed-model { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; color: var(--accent); }
   .feed-target { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); word-break: break-all; }
   .feed-meta { display: flex; flex-wrap: wrap; gap: 5px; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+  /* Provider connection catalog */
+  .session-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+  }
+  .section-eyebrow {
+    font-family: var(--font-mono);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+  }
+  .section-subtitle {
+    max-width: 760px;
+    margin-top: 5px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+  .session-count, .catalog-count {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+  .session-count {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 7px;
+    white-space: nowrap;
+  }
+  .session-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, .62fr);
+    gap: 16px;
+    align-items: start;
+    width: 100%;
+  }
+  .session-main, .connection-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+  .catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 10px;
+  }
+  .catalog-card {
+    display: flex;
+    min-height: 132px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px;
+    text-align: left;
+    background: #0d0d10;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.02);
+  }
+  .catalog-card:hover { border-color: var(--border-highlight); }
+  .catalog-card.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(229,106,74,.18); }
+  .catalog-card.unavailable { opacity: .56; }
+  .catalog-card-top { display: flex; justify-content: space-between; gap: 8px; }
+  .catalog-name { font-size: 11.5px; font-weight: 600; }
+  .catalog-description, .catalog-note {
+    font-size: 10px;
+    line-height: 1.45;
+    color: var(--text-dim);
+  }
+  .catalog-note { color: #f59e0b; }
+  .list-heading {
+    margin-top: 6px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  .connection-card { margin: 0; }
+  .connection-drawer { position: sticky; top: 14px; }
+  .docs-link { justify-content: center; }
 
   /* Split layouts */
   .split-layout {

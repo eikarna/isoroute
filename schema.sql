@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS providers (
   type TEXT NOT NULL DEFAULT 'openai',
   headers_json TEXT,
   oauth_json TEXT,
+  connection_json TEXT,
   enabled INTEGER NOT NULL DEFAULT 1
 );
 

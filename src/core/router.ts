@@ -153,7 +153,9 @@ export class EdgeRouter {
 
       for (let keyAttempt = 0; keyAttempt < maxKeyAttempts; keyAttempt++) {
         // Select active healthy key from pool or OAuth JIT
-        const oauthToken = await OAuthManager.getValidAccessToken(provider);
+        const oauthToken = await OAuthManager.getValidAccessToken(provider, async (refreshedProvider) => {
+          await this.storage.saveProvider(refreshedProvider);
+        });
         const token = oauthToken || KeyPoolManager.selectKey(provider);
         const releaseKey = token ? KeyPoolManager.acquireKey(token) : () => {};
 
@@ -172,7 +174,13 @@ export class EdgeRouter {
           const action = isStream ? "streamGenerateContent?alt=sse" : "generateContent";
           upstreamUrl = `${provider.baseUrl.replace(/\/+$/, "")}/v1beta/models/${target.model}:${action}`;
           if (token) {
-            headers["x-goog-api-key"] = token;
+            // ADC obtains OAuth access tokens, not Google API keys. Sending the
+            // token in x-goog-api-key makes a valid ADC connection fail upstream.
+            if (provider.connection?.catalogId === "google-adc") {
+              headers["Authorization"] = `Bearer ${token}`;
+            } else {
+              headers["x-goog-api-key"] = token;
+            }
           }
           upstreamBody = GeminiAdapter.transformRequest(body);
         } else if (provider.type === "anthropic") {

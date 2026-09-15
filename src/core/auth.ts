@@ -1,4 +1,4 @@
-// Lightweight Web Crypto Administrative Authentication (default password: 123456)
+// Lightweight Web Crypto administrative authentication.
 
 function getEnvSafe(key: string, fallback: string): string {
   try {
@@ -9,7 +9,21 @@ function getEnvSafe(key: string, fallback: string): string {
   return fallback;
 }
 
-const ADMIN_PASSWORD = getEnvSafe("ADMIN_PASSWORD", "123456");
+let cachedLocalAdminPassword = "";
+
+function getLocalAdminPassword(): string {
+  if (cachedLocalAdminPassword) return cachedLocalAdminPassword;
+  const configured = getEnvSafe("ADMIN_PASSWORD", "").trim();
+  if (configured) {
+    cachedLocalAdminPassword = configured;
+    return configured;
+  }
+  const generated = crypto.randomUUID().replace(/-/g, "");
+  console.warn(`ADMIN_PASSWORD is unset. Generated local-only admin password: ${generated}`);
+  cachedLocalAdminPassword = generated;
+  return generated;
+}
+
 const AUTH_SECRET = getEnvSafe("AUTH_SECRET", "isoroute-secret-salt-2026");
 
 export class AdminAuth {
@@ -17,12 +31,12 @@ export class AdminAuth {
    * Verify password and issue signed session token
    */
   static async login(password: string, expectedPassword?: string): Promise<{ success: boolean; token?: string; error?: string }> {
-    const targetPassword = expectedPassword || ADMIN_PASSWORD;
-    if (password !== targetPassword) {
+    const targetPassword = expectedPassword ?? getLocalAdminPassword();
+    if (!targetPassword || password !== targetPassword) {
       return { success: false, error: "Invalid administrative password" };
     }
 
-    const token = await this.generateToken();
+    const token = await this.generateToken(targetPassword);
     return { success: true, token };
   }
 
@@ -30,7 +44,8 @@ export class AdminAuth {
    * Verify session token from Authorization header or Cookie or Headless Admin Key
    */
   static async verify(req: Request, expectedPassword?: string): Promise<boolean> {
-    const targetPassword = expectedPassword || ADMIN_PASSWORD;
+    const targetPassword = expectedPassword ?? getLocalAdminPassword();
+    if (!targetPassword) return false;
 
     // 1. Direct Headless Admin Key Header (9Router-style automation)
     const adminKeyHeader = req.headers.get("x-admin-key") || req.headers.get("x-api-key");
@@ -71,22 +86,22 @@ export class AdminAuth {
       // Token valid for 7 days
       if (Date.now() - timestamp > 7 * 86400 * 1000) return false;
 
-      const expectedSignature = await this.signTimestamp(timestampStr);
+      const expectedSignature = await this.signTimestamp(timestampStr, targetPassword);
       return signature === expectedSignature;
     } catch {
       return false;
     }
   }
 
-  private static async generateToken(): Promise<string> {
+  private static async generateToken(password: string): Promise<string> {
     const timestampStr = Date.now().toString();
-    const signature = await this.signTimestamp(timestampStr);
+    const signature = await this.signTimestamp(timestampStr, password);
     return `${timestampStr}.${signature}`;
   }
 
-  private static async signTimestamp(timestamp: string): Promise<string> {
+  private static async signTimestamp(timestamp: string, password: string): Promise<string> {
     const enc = new TextEncoder();
-    const keyData = enc.encode(`${AUTH_SECRET}:${ADMIN_PASSWORD}`);
+    const keyData = enc.encode(`${AUTH_SECRET}:${password}`);
     const key = await crypto.subtle.importKey(
       "raw",
       keyData,

@@ -238,21 +238,22 @@ export class BulkIngestEngine {
           const name = obj.name || `${obj.provider || "prov"}-${hash.slice(0, 8)}`;
           const id = obj.id || `p-${hash.slice(0, 12)}`;
 
+          // OAuth/session material is intentionally not accepted in bulk ingest.
+          // It must enter through a typed built-in connection so its transport,
+          // validation, and encrypted storage are explicit.
           results.push({
             id,
             name,
             baseUrl: obj.baseUrl || options.defaultBaseUrl || "https://api.openai.com/v1",
-            apiKey: key || undefined,
+            apiKey: typeof obj.apiKey === "string"
+              ? obj.apiKey
+              : typeof obj.key === "string"
+                ? obj.key
+                : typeof obj.token === "string"
+                  ? obj.token
+                  : undefined,
             type: obj.type || options.defaultProviderType || "openai",
             headers: obj.headers,
-            oauth: obj.oauth || (obj.refreshToken || obj.access_token ? {
-              clientId: obj.clientId || obj.client_id || "",
-              clientSecret: obj.clientSecret || obj.client_secret || "",
-              refreshToken: obj.refreshToken || obj.refresh_token || "",
-              tokenEndpoint: obj.tokenEndpoint || obj.token_endpoint || "",
-              accessToken: obj.accessToken || obj.access_token || "",
-              expiresAt: obj.expiresAt || obj.expires_at || 0,
-            } : undefined),
             enabled: obj.enabled ?? true,
           });
         }
@@ -260,28 +261,11 @@ export class BulkIngestEngine {
       return results;
     }
 
-    // Case B: Single Object (e.g. Cursor / Kiro / Google ADC Session JSON)
+    // Case B: Single object. Session credentials are deliberately excluded;
+    // callers must use the typed /api/connections flow instead.
     if (data && typeof data === "object") {
       const obj = data as Record<string, any>;
-      // Cursor / Kiro Session JSON
-      if (obj.access_token || obj.refreshToken || obj.refresh_token || obj.tokenEndpoint) {
-        const hash = this.hashKey(JSON.stringify(obj));
-        results.push({
-          id: `oauth-${hash.slice(0, 12)}`,
-          name: obj.name || `OAuth Session (${hash.slice(0, 8)})`,
-          baseUrl: obj.baseUrl || options.defaultBaseUrl || "https://api.openai.com/v1",
-          type: "custom",
-          oauth: {
-            clientId: obj.clientId || obj.client_id || "",
-            clientSecret: obj.clientSecret || obj.client_secret || "",
-            refreshToken: obj.refreshToken || obj.refresh_token || "",
-            tokenEndpoint: obj.tokenEndpoint || obj.token_endpoint || "",
-            accessToken: obj.accessToken || obj.access_token || "",
-            expiresAt: obj.expiresAt || obj.expires_at || 0,
-          },
-          headers: obj.headers,
-          enabled: true,
-        });
+      if (obj.access_token || obj.refreshToken || obj.refresh_token || obj.tokenEndpoint || obj.type === "authorized_user") {
         return results;
       }
 

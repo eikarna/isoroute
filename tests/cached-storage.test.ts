@@ -81,13 +81,13 @@ describe("CachedStorageAdapter & Smart Aliasing", () => {
     await memory.saveCombo({
       id: "gemini-flash-latest",
       displayName: "Gemini Flash Latest",
-      targets: [{ providerId: "mock-gemini", model: "gemini-3.8-flash", priority: 10 }],
+      targets: [{ providerId: "mock-gemini", model: "gemini-3.8-flash", priority: 10, timeoutMs: 100 }],
       enabled: true,
     });
     await memory.saveCombo({
       id: "smart-tier",
       displayName: "Smart Tier",
-      targets: [{ providerId: "mock-gemini", model: "claude-3-7-sonnet", priority: 10 }],
+      targets: [{ providerId: "mock-gemini", model: "claude-3-7-sonnet", priority: 10, timeoutMs: 100 }],
       enabled: true,
     });
 
